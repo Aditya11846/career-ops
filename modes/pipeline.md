@@ -16,6 +16,16 @@ Sweep all pending URLs in one batch with the zero-token liveness checker before 
 
 This complements — does not replace — the per-URL liveness gate in `auto-pipeline` (Step 0.5) and the `apply` preflight: the sweep drops the dead postings up front, in bulk, so the user never opens a tab or spends a token on them.
 
+## Ghost-listing gate (zero-LLM)
+
+**Run this after the liveness sweep, before the pre-screen gate.** Reposted, stale, or unresolvable-domain postings are unlikely to be real openings — filtering them before spending a model call avoids wasting evaluations on req-mill listings (job-search-automation plan, Section 5).
+
+1. For each surviving URL's offer data (title, company, url, salary, postedAt, description if available), call `ghostCheck(offer, repostFlagSet)` from `ghost-filter.mjs` — `repostFlagSet` comes from `buildRepostFlagSet(parseScanHistory(readFileSync('data/scan-history.tsv')))` computed once per pipeline run, not per URL.
+2. If `ghostIsFlagged(flags)` is true, the listing is **never dropped automatically** — run one cheap classification pass using the tier's economy-equivalent model (same model tier as the pre-screen gate below): ask it to classify the JD as "specific role" vs. "generic req-mill posting" given the flags and JD text.
+   - If classified as a generic req-mill posting: skip the full evaluation, log the discard to `data/discard.log` (same format as the pre-screen gate's discard log, reason `ghost-filter: {flags joined by comma} — {classification reasoning}`), mark it `- [x] #-- | {url} | skipped (ghost-listing: {reason})` in "Processed", and continue to the next URL. No `REPORT_NUM` is claimed.
+   - If classified as a specific real role despite the flags: continue to the pre-screen gate and full evaluation as normal, but carry the flags into Block G (Posting Legitimacy) of the eventual report so the signal isn't lost.
+3. Unflagged listings continue straight to the pre-screen gate below with no added cost.
+
 ## Pre-screen gate (standard / premium tiers only)
 
 Read `spend_tier` from `config/profile.yml` (see `modes/_shared.md` -- Spend Tier section; defaults to `standard` if absent).
@@ -32,10 +42,11 @@ Read `spend_tier` from `config/profile.yml` (see `modes/_shared.md` -- Spend Tie
 2. **For each surviving pending URL**:
    a. **Extract JD** using Playwright (browser_navigate + browser_snapshot) → WebFetch → WebSearch
    b. If the URL is not accessible → mark as `- [!]` with a note and continue
-   c. **Pre-screen gate**: apply the gate above (using the extracted JD). If the JD is an obvious mismatch, log the discard to `data/discard.log` (per the **Discard log** rule above — three fields, no job ID in interactive mode), mark it `- [x] #-- | {url} | skipped (pre-screen mismatch: {reason})` in "Processed", and continue to the next URL. No `REPORT_NUM` is claimed for discarded postings.
-   d. Claim the next sequential `REPORT_NUM` atomically by running `node reserve-report-num.mjs` (and release the sentinel using `node reserve-report-num.mjs --release <num>` after the report is written)
-   e. **Execute full auto-pipeline**: Evaluation A-F → Report .md → PDF (if score >= `auto_pdf_score_threshold`) → Tracker. Read `modes/_custom.md` → Pipeline Rules, if it exists, and apply its override here. Default (if absent or silent): standard pipeline execution.
-   f. **Move from "Pending" to "Processed"**: `- [x] #NNN | URL | Company | Role | Score/5 | PDF ✅/❌`
+   c. **Ghost-listing gate**: apply the gate above (using the extracted JD's offer data). If classified as a generic req-mill posting, log the discard and mark it `- [x] #-- | {url} | skipped (ghost-listing: {reason})` in "Processed", and continue to the next URL. No `REPORT_NUM` is claimed for discarded postings.
+   d. **Pre-screen gate**: apply the gate above (using the extracted JD). If the JD is an obvious mismatch, log the discard to `data/discard.log` (per the **Discard log** rule above — three fields, no job ID in interactive mode), mark it `- [x] #-- | {url} | skipped (pre-screen mismatch: {reason})` in "Processed", and continue to the next URL. No `REPORT_NUM` is claimed for discarded postings.
+   e. Claim the next sequential `REPORT_NUM` atomically by running `node reserve-report-num.mjs` (and release the sentinel using `node reserve-report-num.mjs --release <num>` after the report is written)
+   f. **Execute full auto-pipeline**: Evaluation A-F → Report .md → PDF (if score >= `auto_pdf_score_threshold`) → Tracker. Read `modes/_custom.md` → Pipeline Rules, if it exists, and apply its override here. Default (if absent or silent): standard pipeline execution.
+   g. **Move from "Pending" to "Processed"**: `- [x] #NNN | URL | Company | Role | Score/5 | PDF ✅/❌`
 
    **About the PDF gate (configurable):** Read `config/profile.yml` → `auto_pdf_score_threshold`. If the key does not exist, default to `3.0` (this mode's original gate). If the evaluation score is less than the threshold, skip PDF generation: write the report normally, show in the header `**PDF:** not generated — run /career-ops pdf {company-slug} to create on demand`, and mark PDF ❌ in the tracker. If the score is ≥ threshold, generate the PDF as usual.
 
