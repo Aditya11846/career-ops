@@ -368,8 +368,11 @@ risk_summary:
   culture: "{pass | caution | fail | not_evaluated}"
   interview_redflags: "{none | caution | warning | not_evaluated}"
   ai_infra: "{consistent | mismatch | not_evaluated}"
+company_heat: {0-100 integer from `node signal-agent/compute-heat.mjs --read "{company}"`, or null if signal-agent has never scored this company. NEVER changes `score` above or _shared.md's evaluation formula — this is a separate, additive signal for prioritization only.}
 ```
 ```
+
+**`company_heat` lookup (optional, additive-only):** before writing the Machine Summary, run `node signal-agent/compute-heat.mjs --read "{company}"`. If it returns a stored record, use its `heat` value for `company_heat`; if it returns `null` (company never scored, or signal-agent hasn't been run), write `company_heat: null` — never estimate a value or block the evaluation waiting on it. This is purely a prioritization signal for the dashboard/queue; it must never adjust `score`, `final_decision`, or any other evaluation field.
 
 Then include:
 
