@@ -16,6 +16,8 @@ data/agent-inbox.md
 data/active-interviews.md
 data/reply-candidates.json
 data/company-signals.json
+data/needs-input-queue.json
+data/submission-log.jsonl
 data/parser-output/**/*.json
 !data/parser-output/.gitkeep
 !data/parser-output/**/.gitkeep
