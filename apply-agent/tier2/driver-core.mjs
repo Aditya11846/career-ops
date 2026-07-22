@@ -81,7 +81,12 @@ function saveShot(dataUri, path) {
 export async function runTier2Apply(job) {
   const { platform, url, company, role, location = '', reportRef = null } = job;
 
-  if (!withinApplyWindow()) {
+  // Test-only override: never set in normal operation. Lets a manual test
+  // run exercise the fill/pause-trigger path outside the real 8am-11pm IST
+  // window without touching the pacing logic itself. Nothing downstream
+  // ever auto-submits regardless of this flag.
+  const skipPacingGate = process.env.APPLY_AGENT_SKIP_PACING_GATE === '1';
+  if (!skipPacingGate && !withinApplyWindow()) {
     return { decision: 'skipped', reason: 'outside the 8am-11pm IST apply window' };
   }
   if (isCapped(platform)) {
