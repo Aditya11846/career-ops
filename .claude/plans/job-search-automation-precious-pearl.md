@@ -111,6 +111,8 @@ New `reply-tracker/gmail-watcher.mjs`, reusing `plugins/gmail/index.mjs`'s OAuth
 
 **Verification:** point the watcher at a test label with 2–3 known reply emails (interview invite, rejection, auto-confirmation); confirm classifications match, and the interactive y/N confirmation in `reply-watch.mjs` still works before it shells `tracker.mjs sync`.
 
+**Status (2026-07-23): done.** `reply-tracker/gmail-watcher.mjs` built and verified against a mocked end-to-end run (interview invite, rejection, auto-confirmation, plus one spoofed/DMARC-fail message) — correct classification via `classifyReply()`, correct spoof-skip, correct dedupe on repeat runs. `paste-reply.mjs`'s `appendCandidate()` now routes through `tracker-utils.mjs`'s real lock (was a hand-rolled tmp+rename with no lock) — the bundled fix above, done.
+
 ---
 
 ## Phase 7 — Dashboard panels (Go)
@@ -120,6 +122,8 @@ New `dashboard/panels/{needs-input-queue,budget-usage,pipeline-funnel}.go`, foll
 **Fix bundled into this phase:** `career.go`'s `UpdateApplicationStatus`/`UpdateApplicationStatusAndNotes` (lines ~660–726) currently write `applications.md` via raw `os.WriteFile`, no lock — a second unlocked writer, materially riskier once Signal/Apply/Reply agents write more often. Have the Go side shell out to `set-status.mjs` as a subprocess for status/notes writes instead of writing the file directly — smallest fix, reuses the lock path exactly, avoids porting the stale-lock/retry logic to Go.
 
 **Verification:** seed `needs-input-queue.json`/`company-signals.json` with synthetic entries, run `cd dashboard && go run . --path ..`, confirm all three panels render and the status-change flow still works through the fixed write path.
+
+**Status (2026-07-23): built and compile-verified, not yet interactively verified.** Panels live under `dashboard/internal/ui/screens/` (matching the existing `screens/` convention, not a separate `panels/` package), reachable via new `n`/`b`/`u` keybindings alongside `p` for progress. `go build ./...` and `go vet ./...` both clean (Go was installed via Homebrew on this machine specifically to run this verification). `career.go`'s unlocked-write fix (shelling to `set-status.mjs`) is done and compiles. Manual headless launch confirmed the program initializes and loads data correctly, failing only on the expected "no TTY" error — full interactive verification (visually confirming all three panels render, exercising the status-change flow) still needs a real terminal session and is the one open item from this phase.
 
 ---
 
