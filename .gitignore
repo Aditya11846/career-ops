@@ -17,6 +17,7 @@ data/active-interviews.md
 data/reply-candidates.json
 data/company-signals.json
 data/needs-input-queue.json
+data/approve-queue.json
 data/submission-log.jsonl
 data/tier2-apply-counts.json
 data/parser-output/**/*.json

@@ -55,6 +55,8 @@ import { checkRelocationGate } from './gates/relocation.mjs';
 import { logSubmission, screenshotPath } from './submission-log.mjs';
 // @ts-expect-error — plain .mjs, no type declarations
 import { addEntry } from '../needs-input.mjs';
+// @ts-expect-error — plain .mjs, no type declarations
+import { addEntry as addApproveEntry } from './approve-queue.mjs';
 
 const APPLY_AGENT_DIR = dirname(fileURLToPath(import.meta.url));
 const CAREER_OPS = dirname(APPLY_AGENT_DIR);
@@ -208,13 +210,25 @@ async function main() {
     pauseReason: 'awaiting-human-review',
   });
 
+  const fieldsFilled = fillResult.steps.filter((s: { ok: boolean }) => s.ok).length;
+  const fieldsTotal = fillResult.steps.length;
+
+  // Queue this filled session for fast batch review instead of leaving the
+  // human to hunt down the tab manually — see approve-queue.mjs's header for
+  // why this doesn't weaken the never-submit-without-review guarantee.
+  const queueEntry = addApproveEntry({
+    sessionId: session.id, company, role, score, reportRef,
+    url, fieldsFilled, fieldsTotal, issues: fillResult.issues,
+  });
+
   console.log(JSON.stringify({
     decision: 'filled-awaiting-human-review',
     band,
-    fieldsFilled: fillResult.steps.filter((s: { ok: boolean }) => s.ok).length,
-    fieldsTotal: fillResult.steps.length,
+    fieldsFilled,
+    fieldsTotal,
     issues: fillResult.issues,
     cvAttached: fillResult.cvAttached,
+    approveQueueId: queueEntry.id,
   }, null, 2));
 }
 
