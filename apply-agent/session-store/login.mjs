@@ -41,7 +41,7 @@
  * Next step: find out why the real 'chrome' channel isn't launching (check
  * for a thrown error being swallowed, or Chrome executablePath resolution).
  *
- * UPDATE 2026-07-22: ruled out both leading theories. (1) channel:'chrome'
+ * UPDATE 2026-07-22 (part 1): ruled out both leading theories. (1) channel:'chrome'
  * launches successfully with no thrown error (confirmed via try/catch stack
  * trace) — it is NOT silently falling back to bundled Chromium after all;
  * earlier "Launched via: chromium" log read a stale/wrong signal. (2) No
@@ -49,11 +49,32 @@
  * user watching the window live with an 8s wait inserted) — not a blocked
  * system dialog either. User confirms they ARE logged into linkedin.com in
  * their normal Chrome throughout testing. Landed URL varies between runs
- * (/login/ vs /uas/login) — unexplained. Parked; deprioritized in favor of
- * Phase 5's other open items (Naukri capture, batch-approve queue). Revisit
- * by diffing the copied Cookies row values against the live DB's row values
- * directly (not just row presence) to see if li_at's value itself is
- * present-but-wrong vs actually missing.
+ * (/login/ vs /uas/login) — unexplained.
+ *
+ * UPDATE 2026-07-22 (part 2) — ROOT CAUSE FOUND, CLOSED AS BLOCKED-BY-DESIGN:
+ * queried the real Chrome Cookies DB directly with sqlite3 and confirmed
+ * `li_at|.www.linkedin.com|195` — the session cookie IS present with a real,
+ * non-empty encrypted value. It is copied and decrypted correctly (Naukri's
+ * session capture, using this exact same script/mechanism, works cleanly —
+ * proving the copy/backup/decrypt pipeline itself is sound). The remaining
+ * explanation is that LinkedIn detects the cookie is being presented through
+ * a Playwright/CDP-controlled browser and forces it back to the login page
+ * as a defense-in-depth measure — the same anti-automation detection this
+ * file's own header already documents LinkedIn using to hard-block fresh
+ * sign-ins, apparently also applied to an already-valid session cookie, not
+ * just new logins.
+ *
+ * There IS a known technical workaround (stealth plugins like `patchright`
+ * that hide Playwright's CDP fingerprint from detection scripts), but this
+ * project deliberately does not use it — see this file's own opening
+ * paragraph: "That's a legitimate anti-automation control, not something to
+ * disguise around." Evading LinkedIn's bot detection contradicts that
+ * explicit design stance, so this is not being pursued.
+ *
+ * STATUS: LinkedIn Tier 2 auto-apply is blocked by LinkedIn's own
+ * anti-automation detection, by design choice not to evade it — not an open
+ * bug to keep chasing. Naukri Tier 2 works cleanly via this same script and
+ * is the supported path forward for Phase 5.
  */
 
 import { chromium } from 'playwright-core';

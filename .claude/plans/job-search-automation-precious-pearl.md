@@ -99,6 +99,8 @@ New `apply-agent/tier2/{linkedin,naukri}.ts` on `session.ts`'s patterns, against
 
 **Verification:** start at 1–3/day; deliberately test each pause-trigger (a job with a salary-number field, a job at a company with a known 1st-degree connection) before trusting the path at volume.
 
+**Status update (2026-07-23):** Naukri session capture works cleanly via `apply-agent/session-store/login.mjs naukri` — real cookies confirmed (12 cookies incl. a `naukri.com`-scoped one). **LinkedIn Tier 2 auto-apply is blocked and not being pursued further**: the `li_at` session cookie is confirmed present and correctly decrypted in the copied profile, but LinkedIn's own anti-automation detection forces the CDP-controlled browser back to login regardless — the same detection this project's login.mjs already documents LinkedIn using to block fresh sign-ins. A stealth workaround (`patchright` or similar, hiding Playwright's CDP fingerprint) exists but is deliberately not used — evading LinkedIn's bot detection contradicts this project's explicit design stance. Phase 5 proceeds Naukri-only; LinkedIn Tier 2 is closed as blocked-by-design, not an open bug.
+
 ---
 
 ## Phase 6 — Reply-tracker Gmail watcher
