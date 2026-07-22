@@ -13,16 +13,16 @@
  * the loop, not once at the top — a capped or out-of-window day should still
  * let already-decided jobs finish gracefully, not abort mid-fill.
  *
- * LIVE-SESSION DEPENDENCY (not yet wired): LinkedIn/Naukri Easy Apply
- * requires an authenticated session. Today, /api/apply/session opens a
- * FRESH, logged-out browser context every time — so a real LinkedIn/Naukri
- * URL will correctly hit the "login-wall" pause trigger and route to
- * needs-input every run, never breaking silently. Wiring persistent login
- * (apply-agent/session-store/, Playwright storageState, OS-keychain-backed)
- * is explicitly scoped as the next step before this can apply for real — see
- * session-store/README.md. Never enter the user's LinkedIn/Naukri password
- * on their behalf; that's a manual one-time login the user does themselves
- * in the headed browser, then session-store/ persists it.
+ * LIVE-SESSION DEPENDENCY: LinkedIn/Naukri Easy Apply requires an
+ * authenticated session. /api/apply/session resolves a saved storageState
+ * (cookies + localStorage) from apply-agent/session-store/{platform}.json
+ * when `platform` is 'linkedin' or 'naukri' — see that file's route.ts.
+ * That file is created by the candidate running
+ * `node apply-agent/session-store/login.mjs linkedin` (or naukri) ONCE and
+ * logging in themselves in the visible browser window; this code never
+ * enters their credentials. Until that file exists, /api/apply/session
+ * opens a fresh, logged-out context and every real job correctly hits the
+ * "login-wall" pause trigger below — annotated, never silently broken.
  */
 
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -113,7 +113,7 @@ export async function runTier2Apply(job) {
   const profile = loadProfile();
   let session;
   try {
-    session = await apiPost('/api/apply/session', { url });
+    session = await apiPost('/api/apply/session', { url, platform });
   } catch (err) {
     // openSession() throws for HARD blocks (login-wall, bot-challenge,
     // expired, listing-page, no-form) rather than returning them in

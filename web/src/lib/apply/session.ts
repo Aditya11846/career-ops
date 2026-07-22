@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { chromium, type Browser, type BrowserContext, type Page, type Frame, type Response } from "playwright-core";
 import { extractForm, type ApplyField, type ExtractedForm } from "./extract";
 import { parseGreenhouse, fetchGreenhouseSchema } from "./greenhouse";
@@ -173,11 +174,18 @@ async function nudgeScroll(page: Page): Promise<void> {
   await page.evaluate(() => window.scrollTo(0, 0)).catch(() => {});
 }
 
-export async function openSession(url: string, cliId?: string, forceAgent?: boolean, noApplyBtn?: boolean): Promise<{ id: string; title: string; fields: ApplyField[]; shots: string[]; issues: ApplyIssue[]; needsDrive?: boolean }> {
+export async function openSession(url: string, cliId?: string, forceAgent?: boolean, noApplyBtn?: boolean, storageStatePath?: string): Promise<{ id: string; title: string; fields: ApplyField[]; shots: string[]; issues: ApplyIssue[]; needsDrive?: boolean }> {
   prune();
   if (globalThis.__coIdleTimer) clearTimeout(globalThis.__coIdleTimer); // someone's active
   const browser = await headedBrowser();
-  const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+  // Tier 2 (LinkedIn/Naukri) reuses a real logged-in session — cookies +
+  // localStorage saved once, manually, by the candidate (never entered by
+  // this code) via apply-agent/session-store/login.mjs. Tier 1 (ATS forms)
+  // never passes this; a fresh, logged-out context is correct there.
+  const context = await browser.newContext({
+    viewport: { width: 1280, height: 900 },
+    ...(storageStatePath && existsSync(storageStatePath) ? { storageState: storageStatePath } : {}),
+  });
   context.setDefaultTimeout(8000); // no single action hangs the whole open/fill
   const page = await context.newPage();
   const abort = async (msg: string): Promise<never> => {
