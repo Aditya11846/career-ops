@@ -1,0 +1,191 @@
+#!/usr/bin/env node
+/**
+ * apply-agent/tier2/driver-core.mjs — shared Tier 2 (LinkedIn/Naukri) apply flow
+ *
+ * Talks to the Next.js apply API over HTTP (WEB_APP_URL, default
+ * localhost:3000) — same lesson as Tier 1's orchestrator.ts fix: session.ts's
+ * page.evaluate() closures break when tsx/esbuild-transpiles them from a
+ * direct root-level import, but work correctly under Next's own SWC build.
+ * See apply-agent/orchestrator.ts's file header for the full bug writeup.
+ *
+ * Unlike Tier 1 (score-gated, one-shot per job), Tier 2 runs against a QUEUE
+ * of jobs per platform per day, so pacing/cap checks happen per-job inside
+ * the loop, not once at the top — a capped or out-of-window day should still
+ * let already-decided jobs finish gracefully, not abort mid-fill.
+ *
+ * LIVE-SESSION DEPENDENCY (not yet wired): LinkedIn/Naukri Easy Apply
+ * requires an authenticated session. Today, /api/apply/session opens a
+ * FRESH, logged-out browser context every time — so a real LinkedIn/Naukri
+ * URL will correctly hit the "login-wall" pause trigger and route to
+ * needs-input every run, never breaking silently. Wiring persistent login
+ * (apply-agent/session-store/, Playwright storageState, OS-keychain-backed)
+ * is explicitly scoped as the next step before this can apply for real — see
+ * session-store/README.md. Never enter the user's LinkedIn/Naukri password
+ * on their behalf; that's a manual one-time login the user does themselves
+ * in the headed browser, then session-store/ persists it.
+ */
+
+import { readFileSync, writeFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
+import yaml from 'js-yaml';
+
+import { mapFields } from '../field-mapper.mjs';
+import { checkRelocationGate } from '../gates/relocation.mjs';
+import { checkWarmIntroGate } from '../gates/warm-intro.mjs';
+import { checkPauseTriggers } from '../pause-triggers.mjs';
+import { withinApplyWindow, isCapped, recordApply, randomDelayMs } from '../pacing.mjs';
+import { logSubmission, screenshotPath } from '../submission-log.mjs';
+import { addEntry } from '../../needs-input.mjs';
+
+const TIER2_DIR = dirname(fileURLToPath(import.meta.url));
+const CAREER_OPS = dirname(dirname(TIER2_DIR));
+const WEB_APP_URL = process.env.WEB_APP_URL || 'http://localhost:3000';
+
+export function loadProfile() {
+  return yaml.load(readFileSync(join(CAREER_OPS, 'config/profile.yml'), 'utf-8'));
+}
+
+async function apiPost(path, body) {
+  const res = await fetch(`${WEB_APP_URL}${path}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const json = await res.json();
+  if (!res.ok) throw new Error(json.error || `${path} failed (${res.status})`);
+  return json;
+}
+
+function saveShot(dataUri, path) {
+  if (!dataUri || !path) return;
+  const m = /^data:image\/\w+;base64,(.+)$/.exec(dataUri);
+  if (!m) return;
+  writeFileSync(path, Buffer.from(m[1], 'base64'));
+}
+
+/**
+ * Run ONE Tier 2 job through the full pipeline: pacing gates -> relocation
+ * gate -> warm-intro gate (LinkedIn only, needs connectionDegree supplied by
+ * the caller's own connections lookup) -> open session -> pause-triggers ->
+ * field mapping -> fill+handoff. Never submits. Returns a decision object;
+ * never throws for an expected pause (only for a genuine transport/API
+ * failure) so the caller's queue loop can move to the next job.
+ *
+ * @param {{
+ *   platform: 'linkedin'|'naukri', url: string, company: string, role: string,
+ *   location?: string, reportRef?: string|null,
+ *   connectionDegree?: number|null, connectionName?: string|null,
+ * }} job
+ */
+export async function runTier2Apply(job) {
+  const { platform, url, company, role, location = '', reportRef = null } = job;
+
+  if (!withinApplyWindow()) {
+    return { decision: 'skipped', reason: 'outside the 8am-11pm IST apply window' };
+  }
+  if (isCapped(platform)) {
+    const entry = addEntry({
+      source: 'budget_cap',
+      reason: `${platform} has hit its ${25}/day backstop — resumes tomorrow.`,
+      company, role, report_ref: reportRef,
+      context: { url, platform },
+    });
+    return { decision: 'skipped', reason: 'daily_cap', entry };
+  }
+
+  const relocation = checkRelocationGate({ company, role, location, url, reportRef });
+  if (relocation.blocked) {
+    return { decision: 'paused', reason: 'relocation', entry: relocation.entry };
+  }
+
+  if (platform === 'linkedin') {
+    const warmIntro = checkWarmIntroGate({
+      company, role, url, reportRef,
+      connectionDegree: job.connectionDegree ?? null,
+      connectionName: job.connectionName ?? null,
+    });
+    if (warmIntro.blocked) {
+      return { decision: 'paused', reason: 'warm_intro', entry: warmIntro.entry };
+    }
+  }
+
+  const profile = loadProfile();
+  let session;
+  try {
+    session = await apiPost('/api/apply/session', { url });
+  } catch (err) {
+    // openSession() throws for HARD blocks (login-wall, bot-challenge,
+    // expired, listing-page, no-form) rather than returning them in
+    // session.issues — soft issues (e.g. captcha-present) DO come back in
+    // issues and are handled by checkPauseTriggers below. Until
+    // session-store/ wires a persistent logged-in session, every real
+    // LinkedIn/Naukri URL will hit login-wall HERE, every time — so this
+    // must pause-and-continue, never crash the day's queue.
+    const message = err instanceof Error ? err.message : String(err);
+    const entry = addEntry({
+      source: 'apply_pause',
+      reason: message,
+      company, role, report_ref: reportRef,
+      context: { url, platform },
+    });
+    logSubmission({ company, role, url, reportRef, tier: 2, variant: null, formData: {}, outcome: 'paused', pauseReason: 'open_session_failed' });
+    return { decision: 'paused', reason: 'open_session_failed', entry };
+  }
+
+  const staticTrigger = checkPauseTriggers({ issues: session.issues });
+  if (staticTrigger.paused) {
+    const entry = addEntry({
+      source: 'apply_pause',
+      reason: staticTrigger.reason,
+      company, role, report_ref: reportRef,
+      context: { url, issueCode: staticTrigger.code, sessionId: session.id, platform },
+    });
+    logSubmission({ company, role, url, reportRef, tier: 2, variant: null, formData: {}, outcome: 'paused', pauseReason: staticTrigger.code });
+    await apiPost('/api/apply/close', { sessionId: session.id });
+    return { decision: 'paused', reason: staticTrigger.code, entry };
+  }
+
+  const { answers, unmapped, salaryFields } = mapFields(session.fields, profile);
+  const beforePath = reportRef ? screenshotPath(reportRef, 'before') : null;
+  saveShot(session.shots[session.shots.length - 1], beforePath);
+
+  const fieldTrigger = checkPauseTriggers({ unmapped, salaryFields });
+  if (fieldTrigger.paused) {
+    const entry = addEntry({
+      source: fieldTrigger.code === 'unmapped_field' ? 'unmapped_field' : 'apply_pause',
+      reason: fieldTrigger.reason,
+      company, role, report_ref: reportRef,
+      context: { url, sessionId: session.id, platform, unmapped: unmapped.map(f => ({ id: f.id, label: f.label })), salaryFields: salaryFields.map(f => ({ id: f.id, label: f.label })) },
+    });
+    logSubmission({ company, role, url, reportRef, tier: 2, variant: null, formData: answers, beforeScreenshot: beforePath, outcome: 'paused', pauseReason: fieldTrigger.code });
+    // fill what WAS mapped, then hand off for the human to finish + review
+    await apiPost('/api/apply/fill', { sessionId: session.id, answers, fields: session.fields, handoff: true, company });
+    return { decision: 'paused', reason: fieldTrigger.code, entry };
+  }
+
+  const fillResult = await apiPost('/api/apply/fill', { sessionId: session.id, answers, fields: session.fields, handoff: true, company });
+
+  const afterPath = reportRef ? screenshotPath(reportRef, 'after') : null;
+  saveShot(fillResult.steps[fillResult.steps.length - 1]?.thumb, afterPath);
+
+  logSubmission({
+    company, role, url, reportRef, tier: 2, variant: null,
+    formData: answers, beforeScreenshot: beforePath, afterScreenshot: afterPath,
+    // Never "submitted" — every tier stops at fill+handoff by construction.
+    outcome: 'paused', pauseReason: 'awaiting-human-review',
+  });
+  recordApply(platform);
+
+  return {
+    decision: 'filled-awaiting-human-review',
+    fieldsFilled: fillResult.steps.filter(s => s.ok).length,
+    fieldsTotal: fillResult.steps.length,
+    cvAttached: fillResult.cvAttached,
+  };
+}
+
+/** Randomized human-like pause between jobs in a Tier 2 queue run. */
+export async function pacingDelay(minSec = 45, maxSec = 240) {
+  await new Promise(resolve => setTimeout(resolve, randomDelayMs(minSec, maxSec)));
+}
