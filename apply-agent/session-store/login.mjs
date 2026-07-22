@@ -29,13 +29,25 @@
  *
  * Sessions expire eventually — re-run this (after logging in again in your
  * normal Chrome, if needed) to refresh session-store/{platform}.json.
+ *
+ * KNOWN BUG (unresolved): channel:'chrome' launchPersistentContext() is
+ * silently falling back to Playwright's bundled Chromium (confirmed via the
+ * "Launched via: chromium" log line), which can't decrypt Chrome's encrypted
+ * cookie values — macOS Keychain's "Chrome Safe Storage" item ties the
+ * decryption key to Google Chrome.app's bundle ID, so the session cookie
+ * looks present in the DB but decrypts to garbage under bundled Chromium,
+ * producing a false "not logged in". sqlite3 .backup (see
+ * refreshCookieSnapshots) already ruled out WAL torn-reads as the cause.
+ * Next step: find out why the real 'chrome' channel isn't launching (check
+ * for a thrown error being swallowed, or Chrome executablePath resolution).
  */
 
 import { chromium } from 'playwright-core';
-import { existsSync, mkdirSync, rmSync, cpSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { existsSync, mkdirSync, rmSync, cpSync, readdirSync } from 'node:fs';
+import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { homedir, platform as osPlatform } from 'node:os';
+import { execFileSync } from 'node:child_process';
 
 const SESSION_STORE_DIR = dirname(fileURLToPath(import.meta.url));
 
@@ -64,7 +76,48 @@ const PLATFORMS = {
 // Exclude the heavy, non-session-relevant parts of a Chrome profile (cache,
 // GPU cache, service worker storage, extension binaries) — we only need
 // cookies + local storage to survive into the profile copy.
-const COPY_EXCLUDES = new Set(['Cache', 'Code Cache', 'GPUCache', 'DawnCache', 'Service Worker', 'Extensions', 'Extension State', 'GrShaderCache', 'ShaderCache']);
+const COPY_EXCLUDES = new Set([
+  'Cache', 'Code Cache', 'GPUCache', 'DawnCache', 'Service Worker', 'Extensions', 'Extension State', 'GrShaderCache', 'ShaderCache',
+  // Process-instance-specific lock files — carrying these into the copy can
+  // make the copied profile behave like a fresh/locked session instead of
+  // loading the real cookies.
+  'SingletonLock', 'SingletonCookie', 'SingletonSocket', 'lockfile',
+]);
+
+// Chrome's Cookies DB is WAL-mode SQLite. A raw file copy while Chrome (or a
+// lingering helper process) still holds it open can grab a torn/inconsistent
+// snapshot that's missing recently-written rows like the LinkedIn/Naukri
+// session cookie, even though the copy "succeeds" with no error. sqlite3's
+// `.backup` command uses SQLite's online backup API, which is safe against
+// concurrent writers and always yields a consistent snapshot — so after the
+// plain recursive copy, we re-snapshot every `Cookies` file directly from the
+// live source (not from the already-copied file) to replace whatever the raw
+// copy captured.
+function refreshCookieSnapshots(copyDir, sourceDir) {
+  const findCookieFiles = (dir) => {
+    let found = [];
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = join(dir, entry.name);
+      if (entry.isDirectory()) found = found.concat(findCookieFiles(full));
+      else if (entry.name === 'Cookies') found.push(full);
+    }
+    return found;
+  };
+
+  for (const copiedCookiesFile of findCookieFiles(copyDir)) {
+    const rel = relative(copyDir, copiedCookiesFile);
+    const liveCookiesFile = join(sourceDir, rel);
+    if (!existsSync(liveCookiesFile)) continue;
+    try {
+      execFileSync('sqlite3', [liveCookiesFile, `.backup ${copiedCookiesFile}`], { stdio: ['pipe', 'pipe', 'pipe'] });
+      rmSync(`${copiedCookiesFile}-wal`, { force: true });
+      rmSync(`${copiedCookiesFile}-journal`, { force: true });
+      console.log(`  backed up ${rel}`);
+    } catch (err) {
+      console.error(`Warning: sqlite3 backup failed for ${rel}, keeping raw copy (${err.stderr?.toString() || err.message})`);
+    }
+  }
+}
 
 async function main() {
   const platform = process.argv[2];
@@ -95,6 +148,9 @@ async function main() {
     },
   });
 
+  console.log('Re-snapshotting cookie DBs via sqlite3 .backup (avoids WAL torn reads)...');
+  refreshCookieSnapshots(copyDir, sourceDir);
+
   console.log('Opening the profile copy to check login status...');
   let context;
   try {
@@ -102,9 +158,11 @@ async function main() {
       channel: 'chrome',
       headless: false,
       viewport: { width: 1280, height: 900 },
-    }).catch(() =>
-      chromium.launchPersistentContext(copyDir, { headless: false, viewport: { width: 1280, height: 900 } }),
-    );
+    }).catch((err) => {
+      console.error(`Real Chrome channel launch failed (${err.message}); falling back to bundled Chromium — cookie decryption may fail if macOS Keychain ties the key to Google Chrome.app's bundle ID.`);
+      return chromium.launchPersistentContext(copyDir, { headless: false, viewport: { width: 1280, height: 900 } });
+    });
+    console.log(`Launched via: ${context._browser?._initializer?.name || context._options?.channel || 'unknown'}`);
     const page = context.pages()[0] || (await context.newPage());
     await page.goto(cfg.checkUrl, { waitUntil: 'domcontentloaded', timeout: 30_000 });
     await page.waitForTimeout(2000);
