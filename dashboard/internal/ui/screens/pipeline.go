@@ -92,6 +92,15 @@ type PipelineRefreshMsg struct{}
 // PipelineOpenProgressMsg is emitted when the progress screen should open.
 type PipelineOpenProgressMsg struct{}
 
+// PipelineOpenNeedsInputMsg is emitted when the needs-input-queue panel should open.
+type PipelineOpenNeedsInputMsg struct{}
+
+// PipelineOpenBudgetUsageMsg is emitted when the budget-usage panel should open.
+type PipelineOpenBudgetUsageMsg struct{}
+
+// PipelineOpenFunnelMsg is emitted when the pipeline-funnel panel should open.
+type PipelineOpenFunnelMsg struct{}
+
 var canonicalDiscardReasons = []string{
 	"salary_too_low",
 	"hybrid_required",
@@ -604,6 +613,15 @@ func (m PipelineModel) handleKey(msg tea.KeyMsg) (PipelineModel, tea.Cmd) {
 
 	case "p":
 		return m, func() tea.Msg { return PipelineOpenProgressMsg{} }
+
+	case "n":
+		return m, func() tea.Msg { return PipelineOpenNeedsInputMsg{} }
+
+	case "b":
+		return m, func() tea.Msg { return PipelineOpenBudgetUsageMsg{} }
+
+	case "u":
+		return m, func() tea.Msg { return PipelineOpenFunnelMsg{} }
 
 	case "r":
 		return m, func() tea.Msg { return PipelineRefreshMsg{} }

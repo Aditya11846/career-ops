@@ -23,12 +23,18 @@ const (
 	viewPipeline viewState = iota
 	viewReport
 	viewProgress
+	viewNeedsInput
+	viewBudgetUsage
+	viewFunnel
 )
 
 type appModel struct {
 	pipeline        screens.PipelineModel
 	viewer          screens.ViewerModel
 	progress        screens.ProgressModel
+	needsInput      screens.NeedsInputModel
+	budgetUsage     screens.BudgetUsageModel
+	funnel          screens.PipelineFunnelModel
 	state           viewState
 	careerOpsPath   string
 	theme           theme.Theme
@@ -66,6 +72,15 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.state == viewProgress {
 			m.progress.Resize(msg.Width, msg.Height)
+		}
+		if m.state == viewNeedsInput {
+			m.needsInput.Resize(msg.Width, msg.Height)
+		}
+		if m.state == viewBudgetUsage {
+			m.budgetUsage.Resize(msg.Width, msg.Height)
+		}
+		if m.state == viewFunnel {
+			m.funnel.Resize(msg.Width, msg.Height)
 		}
 		pm, cmd := m.pipeline.Update(msg)
 		m.pipeline = pm
@@ -167,6 +182,37 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.state = viewPipeline
 		return m, nil
 
+	case screens.PipelineOpenNeedsInputMsg:
+		entries := data.LoadNeedsInputQueue(m.careerOpsPath)
+		m.needsInput = screens.NewNeedsInputModel(m.theme, entries, m.pipeline.Width(), m.pipeline.Height())
+		m.state = viewNeedsInput
+		return m, nil
+
+	case screens.NeedsInputClosedMsg:
+		m.state = viewPipeline
+		return m, nil
+
+	case screens.PipelineOpenBudgetUsageMsg:
+		usage := data.LoadBudgetUsage(m.careerOpsPath)
+		m.budgetUsage = screens.NewBudgetUsageModel(m.theme, usage, m.pipeline.Width(), m.pipeline.Height())
+		m.state = viewBudgetUsage
+		return m, nil
+
+	case screens.BudgetUsageClosedMsg:
+		m.state = viewPipeline
+		return m, nil
+
+	case screens.PipelineOpenFunnelMsg:
+		apps := data.ParseApplications(m.careerOpsPath)
+		stages := data.ComputePipelineFunnel(m.careerOpsPath, apps)
+		m.funnel = screens.NewPipelineFunnelModel(m.theme, stages, m.pipeline.Width(), m.pipeline.Height())
+		m.state = viewFunnel
+		return m, nil
+
+	case screens.PipelineFunnelClosedMsg:
+		m.state = viewPipeline
+		return m, nil
+
 	case screens.PipelineOpenURLMsg:
 		return m, openCmd(msg.URL)
 
@@ -185,6 +231,21 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.state == viewProgress {
 			pg, cmd := m.progress.Update(msg)
 			m.progress = pg
+			return m, cmd
+		}
+		if m.state == viewNeedsInput {
+			ni, cmd := m.needsInput.Update(msg)
+			m.needsInput = ni
+			return m, cmd
+		}
+		if m.state == viewBudgetUsage {
+			bu, cmd := m.budgetUsage.Update(msg)
+			m.budgetUsage = bu
+			return m, cmd
+		}
+		if m.state == viewFunnel {
+			fn, cmd := m.funnel.Update(msg)
+			m.funnel = fn
 			return m, cmd
 		}
 		pm, cmd := m.pipeline.Update(msg)
@@ -250,6 +311,12 @@ func (m appModel) View() string {
 		return m.viewer.View()
 	case viewProgress:
 		return m.progress.View()
+	case viewNeedsInput:
+		return m.needsInput.View()
+	case viewBudgetUsage:
+		return m.budgetUsage.View()
+	case viewFunnel:
+		return m.funnel.View()
 	default:
 		return m.pipeline.View()
 	}
