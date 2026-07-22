@@ -13,6 +13,19 @@
  *     --role <role> [--location <loc>] [--report <num>] \
  *     [--connection-degree 1|2|3] [--connection-name "Jane Doe"]
  * (with `npm run dev` — or a production `next start` — running in web/)
+ *
+ * STATUS (2026-07-23): kept in place deliberately, not dead code to delete —
+ * LinkedIn Tier 2 auto-apply is currently BLOCKED BY DESIGN, not by a bug.
+ * See apply-agent/session-store/login.mjs's file header for the full
+ * writeup: the li_at session cookie is confirmed present and correctly
+ * decrypted, but LinkedIn's own anti-automation detection forces a
+ * CDP-controlled browser back to login even with a valid cookie. A stealth
+ * workaround exists (patchright etc., hiding Playwright's CDP fingerprint)
+ * but is deliberately not used — evading LinkedIn's bot detection
+ * contradicts this project's explicit design stance. This file (and
+ * driver-core.mjs's platform==='linkedin' branch, including the warm-intro
+ * gate) is left working and documented in case LinkedIn's detection
+ * behavior ever changes; Naukri is the supported Tier 2 path for now.
  */
 
 import { runTier2Apply } from './driver-core.mjs';

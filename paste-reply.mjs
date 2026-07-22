@@ -47,6 +47,8 @@ import path from 'node:path';
 import readline from 'node:readline';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
+import { acquireTrackerLock, trackerLockDirFor, writeFileAtomic } from './tracker-utils.mjs';
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CANDIDATES_PATH = process.env.CAREER_OPS_REPLY_CANDIDATES
   || path.join(__dirname, 'data', 'reply-candidates.json');
@@ -108,31 +110,41 @@ export function normalizeCandidate({ subject, from, body }) {
 /**
  * Append a candidate to the candidates JSON file, creating the file/array if
  * missing, without disturbing any existing entries. Exported for direct unit
- * testing. Returns the total candidate count after the append.
+ * testing and for reply-tracker/gmail-watcher.mjs to share as the one writer
+ * of this file. Returns the total candidate count after the append.
+ *
+ * Locked via tracker-utils.mjs's acquireTrackerLock/writeFileAtomic (the same
+ * primitives merge-tracker.mjs uses for applications.md) rather than the
+ * previous hand-rolled tmp+rename with no lock — reply-candidates.json now
+ * has two potential concurrent producers (this script and the Gmail
+ * watcher), so a real lock matters here in a way it didn't with a single
+ * writer.
  */
-export function appendCandidate(candidate, candidatesPath = CANDIDATES_PATH) {
-  let candidates = [];
-  if (fs.existsSync(candidatesPath)) {
-    let parsed;
-    try {
-      parsed = JSON.parse(fs.readFileSync(candidatesPath, 'utf-8'));
-    } catch (e) {
-      throw new Error(`Could not parse existing candidates file at ${candidatesPath}: ${e.message}`);
+export async function appendCandidate(candidate, candidatesPath = CANDIDATES_PATH) {
+  const lockDir = trackerLockDirFor(candidatesPath);
+  const lock = await acquireTrackerLock(lockDir, { tracker: candidatesPath });
+  try {
+    let candidates = [];
+    if (fs.existsSync(candidatesPath)) {
+      let parsed;
+      try {
+        parsed = JSON.parse(fs.readFileSync(candidatesPath, 'utf-8'));
+      } catch (e) {
+        throw new Error(`Could not parse existing candidates file at ${candidatesPath}: ${e.message}`);
+      }
+      if (!Array.isArray(parsed)) {
+        throw new Error(`Existing candidates file at ${candidatesPath} is not a JSON array`);
+      }
+      candidates = parsed;
+    } else {
+      fs.mkdirSync(path.dirname(candidatesPath), { recursive: true });
     }
-    if (!Array.isArray(parsed)) {
-      throw new Error(`Existing candidates file at ${candidatesPath} is not a JSON array`);
-    }
-    candidates = parsed;
-  } else {
-    fs.mkdirSync(path.dirname(candidatesPath), { recursive: true });
+    candidates.push(candidate);
+    writeFileAtomic(candidatesPath, JSON.stringify(candidates, null, 2));
+    return candidates.length;
+  } finally {
+    lock.release();
   }
-  candidates.push(candidate);
-  // Write-then-rename so an interrupted write (crash, signal, disk full)
-  // can never leave the real candidates file truncated/corrupted.
-  const tmpPath = `${candidatesPath}.tmp`;
-  fs.writeFileSync(tmpPath, JSON.stringify(candidates, null, 2), 'utf-8');
-  fs.renameSync(tmpPath, candidatesPath);
-  return candidates.length;
 }
 
 // Collect subject/from/body from stdin via a single readline.Interface and a
@@ -229,7 +241,7 @@ async function main() {
   }
 
   const candidate = normalizeCandidate(input);
-  const total = appendCandidate(candidate);
+  const total = await appendCandidate(candidate);
 
   const preview = candidate.body_snippet.length > 80
     ? `${candidate.body_snippet.slice(0, 80)}…`
