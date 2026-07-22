@@ -40,6 +40,20 @@
  * refreshCookieSnapshots) already ruled out WAL torn-reads as the cause.
  * Next step: find out why the real 'chrome' channel isn't launching (check
  * for a thrown error being swallowed, or Chrome executablePath resolution).
+ *
+ * UPDATE 2026-07-22: ruled out both leading theories. (1) channel:'chrome'
+ * launches successfully with no thrown error (confirmed via try/catch stack
+ * trace) — it is NOT silently falling back to bundled Chromium after all;
+ * earlier "Launched via: chromium" log read a stale/wrong signal. (2) No
+ * macOS Keychain access dialog appears during the run (confirmed by the
+ * user watching the window live with an 8s wait inserted) — not a blocked
+ * system dialog either. User confirms they ARE logged into linkedin.com in
+ * their normal Chrome throughout testing. Landed URL varies between runs
+ * (/login/ vs /uas/login) — unexplained. Parked; deprioritized in favor of
+ * Phase 5's other open items (Naukri capture, batch-approve queue). Revisit
+ * by diffing the copied Cookies row values against the live DB's row values
+ * directly (not just row presence) to see if li_at's value itself is
+ * present-but-wrong vs actually missing.
  */
 
 import { chromium } from 'playwright-core';
@@ -159,13 +173,14 @@ async function main() {
       headless: false,
       viewport: { width: 1280, height: 900 },
     }).catch((err) => {
-      console.error(`Real Chrome channel launch failed (${err.message}); falling back to bundled Chromium — cookie decryption may fail if macOS Keychain ties the key to Google Chrome.app's bundle ID.`);
+      console.error(`Real Chrome channel launch failed:\n${err.stack || err.message}\nFalling back to bundled Chromium.`);
       return chromium.launchPersistentContext(copyDir, { headless: false, viewport: { width: 1280, height: 900 } });
     });
-    console.log(`Launched via: ${context._browser?._initializer?.name || context._options?.channel || 'unknown'}`);
+    console.log('Chrome window opened. If macOS is showing a "Chrome wants to access your keychain" prompt, click Allow/Always Allow now — waiting 8s...');
     const page = context.pages()[0] || (await context.newPage());
+    await page.waitForTimeout(8000);
     await page.goto(cfg.checkUrl, { waitUntil: 'domcontentloaded', timeout: 30_000 });
-    await page.waitForTimeout(2000);
+    await page.waitForTimeout(3000);
 
     if (!cfg.isLoggedIn(page.url())) {
       console.error(`Not logged into ${platform} in your Chrome profile (landed on ${page.url()}). ${cfg.notLoggedInHint}`);
