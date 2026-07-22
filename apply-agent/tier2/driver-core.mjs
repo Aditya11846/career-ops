@@ -34,9 +34,11 @@ import { mapFields } from '../field-mapper.mjs';
 import { checkRelocationGate } from '../gates/relocation.mjs';
 import { checkWarmIntroGate } from '../gates/warm-intro.mjs';
 import { checkPauseTriggers } from '../pause-triggers.mjs';
-import { withinApplyWindow, isCapped, recordApply, randomDelayMs } from '../pacing.mjs';
+import { withinApplyWindow, randomDelayMs } from '../pacing.mjs';
+import { checkAndIncrement, isCapped } from '../../budget-tracker.mjs';
 import { logSubmission, screenshotPath } from '../submission-log.mjs';
 import { addEntry } from '../../needs-input.mjs';
+import { addEntry as addApproveEntry } from '../approve-queue.mjs';
 
 const TIER2_DIR = dirname(fileURLToPath(import.meta.url));
 const CAREER_OPS = dirname(dirname(TIER2_DIR));
@@ -89,10 +91,11 @@ export async function runTier2Apply(job) {
   if (!skipPacingGate && !withinApplyWindow()) {
     return { decision: 'skipped', reason: 'outside the 8am-11pm IST apply window' };
   }
-  if (isCapped(platform)) {
+  const budgetKind = platform === 'linkedin' ? 'tier2_apply_linkedin' : 'tier2_apply_naukri';
+  if (isCapped(budgetKind)) {
     const entry = addEntry({
       source: 'budget_cap',
-      reason: `${platform} has hit its ${25}/day backstop — resumes tomorrow.`,
+      reason: `${platform} has hit its daily apply backstop — resumes tomorrow.`,
       company, role, report_ref: reportRef,
       context: { url, platform },
     });
@@ -180,13 +183,25 @@ export async function runTier2Apply(job) {
     // Never "submitted" — every tier stops at fill+handoff by construction.
     outcome: 'paused', pauseReason: 'awaiting-human-review',
   });
-  recordApply(platform);
+  checkAndIncrement(budgetKind, { company, role, reportRef });
+
+  const fieldsFilled = fillResult.steps.filter(s => s.ok).length;
+  const fieldsTotal = fillResult.steps.length;
+
+  // Queue this filled session for fast batch review, same as Tier 1's
+  // orchestrator.ts — previously Tier 2 fills left an orphaned browser tab
+  // with no way to find it again outside this one process's stdout.
+  const queueEntry = addApproveEntry({
+    sessionId: session.id, company, role, score: null, reportRef,
+    url, fieldsFilled, fieldsTotal, issues: fillResult.issues,
+  });
 
   return {
     decision: 'filled-awaiting-human-review',
-    fieldsFilled: fillResult.steps.filter(s => s.ok).length,
-    fieldsTotal: fillResult.steps.length,
+    fieldsFilled,
+    fieldsTotal,
     cvAttached: fillResult.cvAttached,
+    approveQueueId: queueEntry.id,
   };
 }
 

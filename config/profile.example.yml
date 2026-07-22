@@ -247,3 +247,11 @@ cover_letter:
 #     cross_role_bucket: "all_EM_roles"
 #     applied_to: ["Senior Software Engineer"]
 #     last_apply_date: "2026-01-01"
+
+# Daily LLM-call + Tier-2-apply ceilings (budget-tracker.mjs). Independent of
+# spend_tier — spend_tier picks the model, this limits call count regardless
+# of tier. Omit either key to fall back to budget-tracker.mjs's defaults
+# (daily_llm_calls: 300, tier2_daily_cap: 25/platform).
+# budget:
+#   daily_llm_calls: 300
+#   tier2_daily_cap: 25
