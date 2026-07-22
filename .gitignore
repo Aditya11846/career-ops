@@ -126,3 +126,4 @@ plan/
 .career-ops-web/logo-cache/
 
 apply-agent/session-store/*.json
+apply-agent/session-store/.profile-copy-*/
