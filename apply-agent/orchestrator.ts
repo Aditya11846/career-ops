@@ -10,26 +10,42 @@
  * IMPORTANT — current scope: this orchestrator does NOT click submit.
  * session.ts's fillSession() is deliberately "never submit by construction"
  * (see that file's own comments), and this orchestrator does not add a
- * submit action on top of it yet. Every run ends in handoffSession() —
- * bringing the pre-filled, reviewed form to the front for the human to
- * click submit themselves. Adding real one-click auto-submission is a
- * separate, explicitly-scoped follow-up (see the job-search-automation
- * plan's Phase 4/5) that needs its own sign-off before being built, given
- * it overrides career-ops' core "never submit without review" guarantee.
+ * submit action on top of it yet. Every run ends in a handoff — bringing
+ * the pre-filled, reviewed form to the front for the human to click submit
+ * themselves. Adding real one-click auto-submission is a separate,
+ * explicitly-scoped follow-up (see the job-search-automation plan's Phase
+ * 4/5) that needs its own sign-off before being built, given it overrides
+ * career-ops' core "never submit without review" guarantee.
+ *
+ * WHY THIS TALKS OVER HTTP, NOT A DIRECT IMPORT (bug fixed 2026-07-22):
+ * web/src/lib/apply/session.ts's extractForm() runs page.evaluate(() => {...})
+ * closures with named inner helper functions. When this file is imported
+ * directly from the repo root and transpiled by tsx/esbuild (as the old
+ * `import { openSession } from '../web/src/lib/apply/session'` did), esbuild's
+ * name-preservation injects a `__name(...)` helper call into those closures.
+ * Playwright serializes the closure to a string and runs it inside the
+ * browser's isolated page context, where `__name` does not exist — so every
+ * extraction call threw `ReferenceError: __name is not defined`, which
+ * pickFormFrame()'s catch swallowed silently, leaving 0 fields extracted and
+ * cascading into "this looks like the careers listing" on real, live
+ * postings (confirmed against Anthropic + Parloa Greenhouse forms). Next.js's
+ * own SWC build of the SAME file does not have this problem — confirmed by
+ * calling /api/apply/session directly, which extracted all fields correctly.
+ * So this orchestrator now calls the already-correct Next.js API routes
+ * instead of re-transpiling web/'s apply library from a different toolchain.
+ * Requires the web/ Next dev or prod server running (see WEB_APP_URL below).
  *
  * Run with:
- *   npx tsx --tsconfig web/tsconfig.json apply-agent/orchestrator.ts \
+ *   npx tsx apply-agent/orchestrator.ts \
  *     --url <url> --score <X.X> --company <name> --role <role> \
  *     [--location <loc>] [--report <num>]
+ * (with `npm run dev` — or a production `next start` — running in web/)
  */
 
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import yaml from 'js-yaml';
-
-import { openSession, fillSession, handoffSession, closeSession, getSession } from '../web/src/lib/apply/session';
-import { resolveTailoredCv } from '../web/src/lib/apply/cv';
 
 // @ts-expect-error — plain .mjs, no type declarations
 import { mapFields } from './field-mapper.mjs';
@@ -42,11 +58,43 @@ import { addEntry } from '../needs-input.mjs';
 
 const APPLY_AGENT_DIR = dirname(fileURLToPath(import.meta.url));
 const CAREER_OPS = dirname(APPLY_AGENT_DIR);
+const WEB_APP_URL = process.env.WEB_APP_URL || 'http://localhost:3000';
 
 type Profile = {
   candidate?: Record<string, string>;
   auto_apply_thresholds?: { high: number; medium: number };
 };
+
+type ApplyField = {
+  id: string;
+  type: string;
+  label: string;
+  required: boolean;
+  options?: string[];
+  [k: string]: unknown;
+};
+type ApplyIssue = { level: 'info' | 'warn' | 'block'; code: string; message: string };
+type OpenSessionResult = { id: string; title: string; fields: ApplyField[]; shots: string[]; issues: ApplyIssue[]; error?: string };
+type FillResult = { steps: { fieldId: string; label: string; ok: boolean; thumb?: string }[]; navigated: boolean; issues: ApplyIssue[]; handedOff: boolean; cvAttached: boolean; error?: string };
+
+async function apiPost<T>(path: string, body: unknown): Promise<T> {
+  const res = await fetch(`${WEB_APP_URL}${path}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const json = (await res.json()) as T & { error?: string };
+  if (!res.ok) throw new Error(json.error || `${path} failed (${res.status})`);
+  return json;
+}
+
+/** Decode a `data:image/jpeg;base64,...` shot into a screenshot file on disk. */
+function saveShot(dataUri: string | undefined, path: string | null): void {
+  if (!dataUri || !path) return;
+  const m = /^data:image\/\w+;base64,(.+)$/.exec(dataUri);
+  if (!m) return;
+  writeFileSync(path, Buffer.from(m[1], 'base64'));
+}
 
 function loadProfile(): Profile {
   return yaml.load(readFileSync(join(CAREER_OPS, 'config/profile.yml'), 'utf-8')) as Profile;
@@ -73,7 +121,7 @@ async function main() {
   const score = Number(parseArg(args, '--score'));
 
   if (!url || Number.isNaN(score)) {
-    console.error('Usage: tsx --tsconfig web/tsconfig.json apply-agent/orchestrator.ts --url <url> --score <X.X> --company <name> --role <role> [--location <loc>] [--report <num>]');
+    console.error('Usage: tsx apply-agent/orchestrator.ts --url <url> --score <X.X> --company <name> --role <role> [--location <loc>] [--report <num>]');
     process.exitCode = 1;
     return;
   }
@@ -94,7 +142,7 @@ async function main() {
   }
 
   console.error(`Opening application session for ${company} — ${role} (${band} band)...`);
-  const session = await openSession(url);
+  const session = await apiPost<OpenSessionResult>('/api/apply/session', { url });
 
   const blockingCodes = new Set(['captcha-present', 'bot-challenge', 'login-wall', 'auth-required']);
   const blockingIssue = session.issues.find(i => i.level === 'block' || blockingCodes.has(i.code));
@@ -107,16 +155,13 @@ async function main() {
     });
     logSubmission({ company, role, url, reportRef, tier: 1, variant: null, formData: {}, outcome: 'paused', pauseReason: blockingIssue.code });
     console.log(JSON.stringify({ decision: 'paused', reason: blockingIssue.code, entry }, null, 2));
-    await closeSession(session.id);
+    await apiPost('/api/apply/close', { sessionId: session.id });
     return;
   }
 
   const { answers, unmapped, salaryFields } = mapFields(session.fields, profile);
-  const rawSession = getSession(session.id);
   const beforePath = reportRef ? screenshotPath(reportRef, 'before') : null;
-  if (rawSession && beforePath) {
-    await rawSession.page.screenshot({ path: beforePath }).catch(() => {});
-  }
+  saveShot(session.shots[session.shots.length - 1], beforePath);
 
   if (unmapped.length > 0) {
     const entry = addEntry({
@@ -127,7 +172,8 @@ async function main() {
     });
     logSubmission({ company, role, url, reportRef, tier: 1, variant: null, formData: answers, beforeScreenshot: beforePath, outcome: 'paused', pauseReason: 'unmapped_field' });
     console.log(JSON.stringify({ decision: 'paused', reason: 'unmapped_field', entry }, null, 2));
-    await handoffSession(session.id); // human fills the missing field(s) and reviews the rest
+    // human fills the missing field(s) and reviews the rest
+    await apiPost('/api/apply/fill', { sessionId: session.id, answers, fields: session.fields, handoff: true, company });
     return;
   }
 
@@ -140,17 +186,16 @@ async function main() {
     });
     logSubmission({ company, role, url, reportRef, tier: 1, variant: null, formData: answers, beforeScreenshot: beforePath, outcome: 'paused', pauseReason: 'salary_field' });
     console.log(JSON.stringify({ decision: 'paused', reason: 'salary_field', entry }, null, 2));
-    await handoffSession(session.id);
+    await apiPost('/api/apply/fill', { sessionId: session.id, answers, fields: session.fields, handoff: true, company });
     return;
   }
 
-  const cvPath = resolveTailoredCv(company) ?? undefined;
-  const fillResult = await fillSession(session.id, answers, session.fields, cvPath);
+  const fillResult = await apiPost<FillResult>('/api/apply/fill', {
+    sessionId: session.id, answers, fields: session.fields, handoff: true, company,
+  });
 
   const afterPath = reportRef ? screenshotPath(reportRef, 'after') : null;
-  if (rawSession && afterPath) {
-    await rawSession.page.screenshot({ path: afterPath }).catch(() => {});
-  }
+  saveShot(fillResult.steps[fillResult.steps.length - 1]?.thumb, afterPath);
 
   logSubmission({
     company, role, url, reportRef, tier: 1, variant: null,
@@ -163,15 +208,13 @@ async function main() {
     pauseReason: 'awaiting-human-review',
   });
 
-  await handoffSession(session.id);
-
   console.log(JSON.stringify({
     decision: 'filled-awaiting-human-review',
     band,
     fieldsFilled: fillResult.steps.filter((s: { ok: boolean }) => s.ok).length,
     fieldsTotal: fillResult.steps.length,
     issues: fillResult.issues,
-    cvAttached: !!cvPath,
+    cvAttached: fillResult.cvAttached,
   }, null, 2));
 }
 
