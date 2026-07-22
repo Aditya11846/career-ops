@@ -1,8 +1,10 @@
 package data
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -661,6 +663,13 @@ func UpdateApplicationStatus(careerOpsPath string, app model.CareerApplication, 
 	return UpdateApplicationStatusAndNotes(careerOpsPath, app, newStatus, "")
 }
 
+// setStatusJSONResult mirrors set-status.mjs's --json output shape (both
+// success and error payloads use the same fields it cares about here).
+type setStatusJSONResult struct {
+	Error string `json:"error"`
+	Code  string `json:"code"`
+}
+
 // UpdateApplicationStatusAndNotes atomically updates both the Status cell and
 // the Notes cell for an application row. It is used by the discard reason
 // picker (Issue 1380) to commit `DISCARD: <reason>` alongside the new status
@@ -670,60 +679,51 @@ func UpdateApplicationStatus(careerOpsPath string, app model.CareerApplication, 
 // notesAppend is appended (with a space separator if notes are non-empty) to
 // whatever the Notes cell already contains. Pass an empty string to leave
 // notes unchanged.
+//
+// Shells out to set-status.mjs instead of writing applications.md directly —
+// that script resolves the row, validates the state against
+// templates/states.yml, and writes under tracker-utils.mjs's shared lock
+// (the same lock merge-tracker.mjs uses). This used to be a raw, unlocked
+// os.WriteFile here, a second uncoordinated writer to the same file the
+// Node side already locks — replaced per the job-search-automation plan's
+// Phase 7 bundled fix.
 func UpdateApplicationStatusAndNotes(careerOpsPath string, app model.CareerApplication, newStatus, notesAppend string) error {
-	filePath := filepath.Join(careerOpsPath, "applications.md")
-	content, err := os.ReadFile(filePath)
-	if err != nil {
-		filePath = filepath.Join(careerOpsPath, "data", "applications.md")
-		content, err = os.ReadFile(filePath)
-		if err != nil {
-			return err
-		}
+	if app.ReportNumber == "" {
+		return fmt.Errorf("application has no report number to select by")
 	}
 
-	lines := strings.Split(string(content), "\n")
-	cols := resolveTrackerColumns(lines)
-	statusIdx, statusOk := cols["status"]
-	if !statusOk {
-		return fmt.Errorf("status column not found in tracker")
+	args := []string{"set-status.mjs", app.ReportNumber, newStatus, "--json"}
+	if notesAppend != "" {
+		args = append(args, "--note", notesAppend)
 	}
-	notesIdx, notesOk := cols["notes"]
-	if notesAppend != "" && !notesOk {
-		return fmt.Errorf("notes column not found in tracker, cannot append notes")
-	}
+	cmd := exec.Command("node", args...)
+	cmd.Dir = careerOpsPath
+	out, runErr := cmd.CombinedOutput()
 
+	var parsed setStatusJSONResult
+	_ = json.Unmarshal(out, &parsed) // best-effort; fall back to raw output below if it doesn't parse
 
-	found := false
-	for i, line := range lines {
-		if !strings.HasPrefix(strings.TrimSpace(line), "|") {
-			continue
-		}
-		if app.ReportNumber == "" || !strings.Contains(line, fmt.Sprintf("[%s]", app.ReportNumber)) {
-			continue
-		}
-		// Update status
-		updated, ok := replaceStatusInLine(line, app.Status, newStatus, statusIdx)
-		if !ok {
-			return fmt.Errorf("failed to replace status: status cell '%s' not matched in row", app.Status)
-		}
-		// Optionally append to notes
-		if notesAppend != "" {
-			var ok bool
-			updated, ok = appendNotesInLine(updated, notesAppend, notesIdx)
-			if !ok {
-				return fmt.Errorf("failed to append notes: notes column index %d out of bounds", notesIdx)
-			}
-		}
-		lines[i] = updated
-		found = true
-		break
+	if runErr == nil {
+		return nil
 	}
 
-	if !found {
-		return fmt.Errorf("application not found: report %s", app.ReportNumber)
+	exitCode := -1
+	if exitErr, ok := runErr.(*exec.ExitError); ok {
+		exitCode = exitErr.ExitCode()
 	}
 
-	return os.WriteFile(filePath, []byte(strings.Join(lines, "\n")), 0644)
+	message := parsed.Error
+	if message == "" {
+		message = strings.TrimSpace(string(out))
+	}
+	if message == "" {
+		message = runErr.Error()
+	}
+
+	if exitCode == 4 {
+		return fmt.Errorf("tracker busy (lock timeout), retry: %s", message)
+	}
+	return fmt.Errorf("set-status.mjs failed: %s", message)
 }
 
 // appendNotesInLine appends text to the Notes cell of a tracker row without
