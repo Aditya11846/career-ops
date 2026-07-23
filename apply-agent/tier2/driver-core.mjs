@@ -59,6 +59,17 @@ async function apiPost(path, body) {
   return json;
 }
 
+async function apiPostSubmit(sessionId) {
+  const res = await fetch(`${WEB_APP_URL}/api/apply/submit`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ sessionId, confirm: true }),
+  });
+  const json = await res.json();
+  if (!res.ok || !json.ok) throw new Error(json.error || `submit failed (${res.status})`);
+  return json;
+}
+
 function saveShot(dataUri, path) {
   if (!dataUri || !path) return;
   const m = /^data:image\/\w+;base64,(.+)$/.exec(dataUri);
@@ -70,13 +81,14 @@ function saveShot(dataUri, path) {
  * Run ONE Tier 2 job through the full pipeline: pacing gates -> relocation
  * gate -> warm-intro gate (LinkedIn only, needs connectionDegree supplied by
  * the caller's own connections lookup) -> open session -> pause-triggers ->
- * field mapping -> fill+handoff. Never submits. Returns a decision object;
- * never throws for an expected pause (only for a genuine transport/API
- * failure) so the caller's queue loop can move to the next job.
+ * field mapping -> fill(+submit if job.autoSubmit and the fill is clean, else
+ * +handoff to the human-review queue). Returns a decision object; never
+ * throws for an expected pause (only for a genuine transport/API failure) so
+ * the caller's queue loop can move to the next job.
  *
  * @param {{
  *   platform: 'linkedin'|'naukri', url: string, company: string, role: string,
- *   location?: string, reportRef?: string|null,
+ *   location?: string, reportRef?: string|null, autoSubmit?: boolean,
  *   connectionDegree?: number|null, connectionName?: string|null,
  * }} job
  */
@@ -176,17 +188,38 @@ export async function runTier2Apply(job) {
 
   const afterPath = reportRef ? screenshotPath(reportRef, 'after') : null;
   saveShot(fillResult.steps[fillResult.steps.length - 1]?.thumb, afterPath);
-
-  logSubmission({
-    company, role, url, reportRef, tier: 2, variant: null,
-    formData: answers, beforeScreenshot: beforePath, afterScreenshot: afterPath,
-    // Never "submitted" — every tier stops at fill+handoff by construction.
-    outcome: 'paused', pauseReason: 'awaiting-human-review',
-  });
   checkAndIncrement(budgetKind, { company, role, reportRef });
 
   const fieldsFilled = fillResult.steps.filter(s => s.ok).length;
   const fieldsTotal = fillResult.steps.length;
+
+  // Same auto-submit rule as Tier 1's orchestrator.ts: a clean fill (every
+  // field ok, no post-fill issues) submits immediately when the caller
+  // (apply-agent/run-approved.mjs) passes autoSubmit — this job already went
+  // through the human approve step upstream. Anything less than clean still
+  // queues for a human below, since that's a genuine ambiguity, not a
+  // redundant recheck.
+  const clean = fieldsFilled === fieldsTotal && fillResult.issues.length === 0;
+  if (job.autoSubmit && clean) {
+    try {
+      const submitResult = await apiPostSubmit(session.id);
+      logSubmission({
+        company, role, url, reportRef, tier: 2, variant: null,
+        formData: answers, beforeScreenshot: beforePath, afterScreenshot: afterPath,
+        outcome: 'submitted',
+      });
+      return { decision: 'submitted', fieldsFilled, fieldsTotal, cvAttached: fillResult.cvAttached, ...submitResult };
+    } catch (err) {
+      // fall through to the human-review queue — never leave a
+      // half-submitted job unaccounted for.
+    }
+  }
+
+  logSubmission({
+    company, role, url, reportRef, tier: 2, variant: null,
+    formData: answers, beforeScreenshot: beforePath, afterScreenshot: afterPath,
+    outcome: 'paused', pauseReason: 'awaiting-human-review',
+  });
 
   // Queue this filled session for fast batch review, same as Tier 1's
   // orchestrator.ts — previously Tier 2 fills left an orphaned browser tab

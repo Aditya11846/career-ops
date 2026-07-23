@@ -543,3 +543,79 @@ export async function handoffSession(id: string): Promise<void> {
   }
   await s.page.bringToFront().catch(() => {});
 }
+
+/** The ONLY function in this codebase that clicks a real submit control. Every
+ *  other path (fillSession, tryApplyTrigger in diagnose.ts) is written to
+ *  explicitly avoid it. Requires the caller to have already gotten explicit
+ *  human sign-off (see apply-agent/approve-queue.mjs's --submit, which only
+ *  operates on entries the human already marked "approved" after reviewing
+ *  the filled form) — this function itself does not re-verify that, it just
+ *  performs the click once asked. Never call this from an unattended/batch
+ *  context without that upstream gate. */
+export async function submitSession(id: string): Promise<{ ok: boolean; navigated: boolean; confirmationText: string | null; screenshot?: string }> {
+  const s = SESSIONS.get(id);
+  if (!s) throw new Error("apply session not found (it may have expired)");
+
+  const startPath = (() => {
+    try {
+      return new URL(s.frame.url()).pathname;
+    } catch {
+      return s.frame.url();
+    }
+  })();
+
+  const shoot = async () => {
+    try {
+      const buf = await s.page.screenshot({ type: "jpeg", quality: 60 });
+      return `data:image/jpeg;base64,${buf.toString("base64")}`;
+    } catch {
+      return undefined;
+    }
+  };
+
+  // Real ATS/test forms often omit an explicit type="submit"/type="button" on
+  // their CTA (HTML defaults a <button> inside a <form> to submit) — so we
+  // match on a "contains" text pattern too, not just an exact phrase, and
+  // fall back to any <form> button/input that ISN'T explicitly type="button"
+  // or type="reset". Still excludes obvious non-submit actions by name so a
+  // "Cancel"/"Save draft"/"Back" button never gets clicked instead.
+  const notSubmit = /cancel|reset|clear|back|save draft|save for later|delete|withdraw/i;
+  const looksLikeSubmit = s.frame
+    .getByRole("button", { name: /submit|send application|apply now|review and submit|submit order/i })
+    .filter({ hasNotText: notSubmit });
+  const explicitSubmit = s.frame.locator('button[type="submit"], input[type="submit"]');
+  const bareFormButton = s.frame.locator('form button:not([type="button"]):not([type="reset"])').filter({ hasNotText: notSubmit });
+  const btn = looksLikeSubmit.or(explicitSubmit).or(bareFormButton).first();
+
+  if (!(await btn.count().catch(() => 0)) || !(await btn.isVisible().catch(() => false))) {
+    throw new Error("no submit control found on the current form — nothing was clicked");
+  }
+  if (!(await btn.isEnabled().catch(() => false))) {
+    throw new Error("the submit control is disabled (likely an unfilled required field) — nothing was clicked");
+  }
+
+  await btn.click({ timeout: 5000 });
+  await s.page.waitForTimeout(1500);
+  await s.page.waitForLoadState("networkidle", { timeout: 8000 }).catch(() => {});
+
+  const endPath = (() => {
+    try {
+      return new URL(s.frame.url()).pathname;
+    } catch {
+      return s.frame.url();
+    }
+  })();
+  const navigated = endPath !== startPath;
+
+  const bodyText = await s.page
+    .evaluate(() => document.body.innerText.slice(0, 4000))
+    .catch(() => "");
+  const confMatch = /thank you|application (received|submitted)|application complete|we('| ha)ve received|successfully applied|congratulations/i.exec(bodyText);
+
+  return {
+    ok: true,
+    navigated,
+    confirmationText: confMatch ? confMatch[0] : null,
+    screenshot: await shoot(),
+  };
+}

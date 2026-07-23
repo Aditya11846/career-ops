@@ -57,6 +57,23 @@ type PipelinePDFGeneratedMsg struct {
 	Path string
 }
 
+// PipelineApproveForApplyMsg requests apply-agent/approve-for-apply.mjs be run
+// for the given report number — the ONE human gate that lets
+// apply-agent/run-approved.mjs fill AND submit a job unattended later
+// (AGENTS.md's Ethical Use section). Never fires without an explicit keypress
+// on a specific selected row.
+type PipelineApproveForApplyMsg struct {
+	CareerOpsPath string
+	ReportNumber  string
+}
+
+// PipelineApprovedMsg reports the outcome of an approve-for-apply run.
+type PipelineApprovedMsg struct {
+	Err     string
+	Company string
+	Role    string
+}
+
 // PipelineLoadReportMsg requests lazy loading of a report summary.
 type PipelineLoadReportMsg struct {
 	CareerOpsPath string
@@ -426,6 +443,14 @@ func (m PipelineModel) Update(msg tea.Msg) (PipelineModel, tea.Cmd) {
 			m.flash = "PDF regenerated and opened: " + filepath.Base(msg.Path)
 		}
 		return m, nil
+
+	case PipelineApprovedMsg:
+		if msg.Err != "" {
+			m.flash = "Approve for apply failed: " + msg.Err
+		} else {
+			m.flash = "Approved for auto-apply: " + msg.Company + " — " + msg.Role + " (run apply-agent/run-approved.mjs to fire it)"
+		}
+		return m, nil
 	case pipelineStartDiscardPickerMsg:
 		// Issue 1380: initialise the discard reason picker state.
 		// Merge predicted reasons (from report) with canonical fallback options.
@@ -622,6 +647,18 @@ func (m PipelineModel) handleKey(msg tea.KeyMsg) (PipelineModel, tea.Cmd) {
 
 	case "u":
 		return m, func() tea.Msg { return PipelineOpenFunnelMsg{} }
+
+	case "A":
+		if app, ok := m.CurrentApp(); ok {
+			if app.ReportNumber == "" {
+				m.flash = "No report number for this row — cannot approve for auto-apply"
+				return m, nil
+			}
+			path, report := m.careerOpsPath, app.ReportNumber
+			return m, func() tea.Msg {
+				return PipelineApproveForApplyMsg{CareerOpsPath: path, ReportNumber: report}
+			}
+		}
 
 	case "r":
 		return m, func() tea.Msg { return PipelineRefreshMsg{} }

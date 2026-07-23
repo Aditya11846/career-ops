@@ -350,10 +350,11 @@ These are two separate axes:
 
 **This system is designed for quality, not quantity.** The goal is to help the user find and apply to roles where there is a genuine match -- not to spam companies with mass applications.
 
-- **NEVER submit an application without the user reviewing it first.** Fill forms, draft answers, generate PDFs -- but always STOP before clicking Submit/Send/Apply. The user makes the final call.
-- **Strongly discourage low-fit applications.** If a score is below 4.0/5, explicitly recommend against applying. The user's time and the recruiter's time are both valuable. Only proceed if the user has a specific reason to override the score.
-- **Quality over speed.** A well-targeted application to 5 companies beats a generic blast to 50. Guide the user toward fewer, better applications.
-- **Respect recruiters' time.** Every application a human reads costs someone's attention. Only send what's worth reading.
+- **The human gate is the approve step, not a second per-form review.** The user reviews and approves a job (via `apply-agent/approve-for-apply.mjs` or the dashboard's approve action) BEFORE any résumé generation or form-filling happens. Once a job is approved, `apply-agent/run-approved.mjs` is allowed to fill AND submit it unattended, in batches, with no additional "review the filled form" click. Never fill or submit a job that was not explicitly approved first -- that approval is the whole guarantee.
+- **Score is informational, not a gate.** Auto-apply thresholds (`config/profile.yml`'s `auto_apply_thresholds`) no longer block a run by default -- the user's explicit approval already is the quality decision. Still surface the score in every evaluation and dashboard view so the user can approve with full information.
+- **Genuine blockers still pause for a human, not for re-review.** Login-walls, captchas, unmapped required fields, and ambiguous salary fields still route to `data/needs-input.md`/`apply-agent/approve-queue.mjs` and stop before submitting -- these are cases the automation cannot safely resolve on its own, not a second look at an already-correct fill.
+- **Never touch a job outside the approved set.** `run-approved.mjs` only ever acts on entries in `data/apply-approved.json` with status `pending`, added there only via an explicit approve action. Blacklisted companies (`data/blacklist.md`) are still excluded from approval entirely.
+- **Respect recruiters' time.** Every application a human reads costs someone's attention. Approve fewer, better-targeted jobs rather than everything that scores above zero.
 
 ---
 

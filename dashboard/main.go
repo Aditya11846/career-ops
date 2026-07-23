@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -222,6 +223,9 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case screens.PipelineGeneratePDFMsg:
 		return m, runGeneratePDF(msg)
 
+	case screens.PipelineApproveForApplyMsg:
+		return m, runApproveForApply(msg)
+
 	default:
 		if m.state == viewReport {
 			vm, cmd := m.viewer.Update(msg)
@@ -289,6 +293,28 @@ func runGeneratePDF(msg screens.PipelineGeneratePDFMsg) tea.Cmd {
 			return screens.PipelinePDFGeneratedMsg{Err: fmt.Sprintf("PDF generated but could not open: %v", err)}
 		}
 		return screens.PipelinePDFGeneratedMsg{Path: pdfAbs}
+	}
+}
+
+// runApproveForApply shells out to apply-agent/approve-for-apply.mjs — the
+// one human gate that lets apply-agent/run-approved.mjs fill AND submit this
+// job unattended later (AGENTS.md's Ethical Use section). Never writes to
+// applications.md or the approve-queue directly; the script owns that.
+func runApproveForApply(msg screens.PipelineApproveForApplyMsg) tea.Cmd {
+	return func() tea.Msg {
+		cmd := exec.Command("node", "apply-agent/approve-for-apply.mjs", msg.ReportNumber)
+		cmd.Dir = msg.CareerOpsPath
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			return screens.PipelineApprovedMsg{Err: summarizeCmdError(err, out)}
+		}
+		// approve-for-apply.mjs prints: "Approved for auto-apply: {company} — {role} (id)"
+		line := strings.TrimSpace(string(out))
+		company, role := "", ""
+		if m := regexp.MustCompile(`Approved for auto-apply:\s*(.+?)\s+—\s+(.+?)\s+\(`).FindStringSubmatch(line); len(m) == 3 {
+			company, role = m[1], m[2]
+		}
+		return screens.PipelineApprovedMsg{Company: company, Role: role}
 	}
 }
 
