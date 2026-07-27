@@ -1,31 +1,26 @@
 #!/usr/bin/env node
 /**
- * senior-search/compute-stability.mjs — company-level layoff-risk signal.
+ * signal-agent/compute-stability.mjs — company-level layoff-risk signal.
  *
- * Deliberately reads/writes the SAME data/company-signals.json file as
- * signal-agent/compute-heat.mjs, keyed by the same normalizeCompany() — this
- * is the one intentional exception to senior-search/'s isolation-from-root
- * rule (see scan-watchlist.mjs's header comment for the rule itself): a
- * company's identity/signals are shared, cross-search knowledge, not personal
- * job-pipeline data, so composing with signal-agent's existing `heat` field
- * on read (rather than duplicating storage in a second file) is the correct
- * reuse — not a data leak between Aditya's and his father's searches, since
- * neither search's pipeline/tracker/cv data ever passes through this file.
+ * Reads/writes the SAME data/company-signals.json file as
+ * signal-agent/compute-heat.mjs, keyed by the same normalizeCompany(), so it
+ * composes with the existing `heat` field on read rather than duplicating
+ * storage.
  *
  * Kept as a SEPARATE script from compute-heat.mjs (not a 5th weight folded
  * into its WEIGHTS const) specifically so this addition never touches that
  * file's existing, documented, tested formula.
  *
  * Usage:
- *   node senior-search/compute-stability.mjs --company "Acme Inc" \
+ *   node signal-agent/compute-stability.mjs --company "Acme Inc" \
  *     --layoffs-fyi-hits 0 --headcount-trend-pct -5
  *     -> computes layoff_risk, merges into the company's existing signal
  *        record (preserving compute-heat.mjs's heat/signals if present).
  *
- *   node senior-search/compute-stability.mjs --read "Acme Inc"
+ *   node signal-agent/compute-stability.mjs --read "Acme Inc"
  *     -> prints the stored signal record for a company, or null.
  *
- *   node senior-search/compute-stability.mjs --self-test
+ *   node signal-agent/compute-stability.mjs --self-test
  */
 
 import { readFileSync, existsSync } from 'fs';
@@ -34,8 +29,8 @@ import { fileURLToPath, pathToFileURL } from 'url';
 
 import { normalizeCompany, writeFileAtomic } from '../tracker-utils.mjs';
 
-const SENIOR_SEARCH_DIR = dirname(fileURLToPath(import.meta.url));
-const CAREER_OPS = dirname(SENIOR_SEARCH_DIR);
+const SIGNAL_AGENT_DIR = dirname(fileURLToPath(import.meta.url));
+const CAREER_OPS = dirname(SIGNAL_AGENT_DIR);
 // Intentionally the SAME path signal-agent/compute-heat.mjs uses — see header.
 const SIGNALS_PATH = join(CAREER_OPS, 'data/company-signals.json');
 
@@ -180,7 +175,7 @@ async function main() {
 
   const company = parseArg(args, '--company');
   if (!company) {
-    console.error('Usage: node senior-search/compute-stability.mjs --company "Name" [--layoffs-fyi-hits N] [--headcount-trend-pct N]');
+    console.error('Usage: node signal-agent/compute-stability.mjs --company "Name" [--layoffs-fyi-hits N] [--headcount-trend-pct N]');
     process.exitCode = 1;
     return;
   }

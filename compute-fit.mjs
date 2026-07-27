@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * senior-search/compute-fit.mjs — per-posting judgment signals for Amit Kumar
+ * compute-fit.mjs — per-posting judgment signals for Amit Kumar
  * Singh's search (comp effective-value, India-hireability confidence, domain
  * fit), plus the blended ranking function.
  *
@@ -322,7 +322,7 @@ if (process.argv[1] && process.argv[1].endsWith('compute-fit.mjs')) {
   if (process.argv.includes('--self-test')) {
     runSelfTest();
   } else {
-    console.log('Usage: node senior-search/compute-fit.mjs --self-test');
+    console.log('Usage: node compute-fit.mjs --self-test');
     console.log('This module is primarily a library — import its functions from an evaluation script.');
   }
 }
