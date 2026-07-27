@@ -7,6 +7,7 @@ data/salary-observations.tsv
 data/status-log.tsv
 data/assessments.tsv
 data/pipeline.md
+data/pipeline-filtered.md
 data/scan-history.tsv
 data/scan-runs.tsv
 data/portal-health.tsv
