@@ -369,10 +369,16 @@ risk_summary:
   interview_redflags: "{none | caution | warning | not_evaluated}"
   ai_infra: "{consistent | mismatch | not_evaluated}"
 company_heat: {0-100 integer from `node signal-agent/compute-heat.mjs --read "{company}"`, or null if signal-agent has never scored this company. NEVER changes `score` above or _shared.md's evaluation formula — this is a separate, additive signal for prioritization only.}
+domain_fit_score: {0-100 integer from `compute-fit.mjs --score`'s `domain_fit_score`, or null if no JD text was passed. NEVER changes `score` above — additive signal only.}
+comp_effective_value_inr: {integer net-INR value from `compute-fit.mjs --score`'s `comp_effective_value_inr`, or null if the JD stated no comp figure. NEVER changes `score` above — additive signal only.}
+india_hireability_confidence: {0-100 integer from `compute-fit.mjs --score`'s `india_hireability_confidence` — always a number, never null (a weighted confidence baseline, not an unknown-state). NEVER changes `score` above — additive signal only.}
+fit_rank: {0-100 integer from `compute-fit.mjs --score`'s `fit_rank`, or null if domain_fit_score or comp_effective_value_inr is null. NEVER changes `score` above or _shared.md's evaluation formula — this is a separate, additive signal for prioritization only.}
 ```
 ```
 
 **`company_heat` lookup (optional, additive-only):** before writing the Machine Summary, run `node signal-agent/compute-heat.mjs --read "{company}"`. If it returns a stored record, use its `heat` value for `company_heat`; if it returns `null` (company never scored, or signal-agent hasn't been run), write `company_heat: null` — never estimate a value or block the evaluation waiting on it. This is purely a prioritization signal for the dashboard/queue; it must never adjust `score`, `final_decision`, or any other evaluation field.
+
+**`domain_fit_score`/`comp_effective_value_inr`/`india_hireability_confidence`/`fit_rank` lookup (optional, additive-only):** before writing the Machine Summary, run `node compute-fit.mjs --score --company "{company}" --jd-text "{the JD text already read for Blocks A/B}"`, adding `--comp-amount N --comp-currency CCY` when the JD's own `advertised_comp` figure (already extracted verbatim for Block D) contains a usable number — parse it yourself into a single representative amount and currency code (e.g. the lower bound of a stated range); never invent a figure the JD doesn't state. Add `--india-entity` and/or `--mentions-eor` only when Block D's research turned up direct evidence of either. Copy the four resulting fields into the Machine Summary verbatim, including any that come back `null` — never estimate a missing one, never block the evaluation waiting on this lookup, and never let any of these four fields influence `score`, `final_decision`, or any other evaluation field above.
 
 Then include:
 

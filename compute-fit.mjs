@@ -19,6 +19,9 @@
  * current Finance Act before relying on it for an actual decision.
  */
 
+import { readFileSync } from 'fs';
+import { readCompanySignal } from './signal-agent/compute-heat.mjs';
+
 // ── Comp effective-value (INR, India-tax-resident) ─────────────────────────
 
 // Illustrative new-regime slabs (annual taxable income, INR) — see caveat above.
@@ -222,6 +225,64 @@ export function blendRank({ domainFit, netEffectiveValueInr, hireability, heat =
   return { rank, excluded: false, effectiveValueScore, stabilityScore };
 }
 
+// ── Combined per-posting scorer (CLI entry point) ───────────────────────────
+
+/**
+ * Pure function combining all four signals into one result — the `--score`
+ * CLI's actual logic, kept pure/injectable (fxRatesToInr, companySignal) so it
+ * stays unit-testable without network/file I/O. Every field independently
+ * degrades to `null` when its input is missing — never blocks, never
+ * estimates, same "null if unknown" contract signal-agent's `company_heat`
+ * already established.
+ *
+ * @param {{jdText?:string, compAmount?:number, compCurrency?:string, compKind?:'cash'|'public_equity'|'private_equity', indiaEntity?:boolean, mentionsEor?:boolean, fxRatesToInr?:Record<string,number>, companySignal?:{heat?:number, layoff_risk?:number}|null}} input
+ */
+export function scorePosting({
+  jdText,
+  compAmount,
+  compCurrency = 'USD',
+  compKind = 'cash',
+  indiaEntity = false,
+  mentionsEor = false,
+  fxRatesToInr = FALLBACK_FX_TO_INR,
+  companySignal = null,
+} = {}) {
+  const domainFitScore = jdText ? scoreDomainFit(jdText) : null;
+
+  const effectiveValue = Number.isFinite(compAmount)
+    ? computeEffectiveValueINR({ amount: compAmount, currency: compCurrency, kind: compKind }, fxRatesToInr)
+    : null;
+  const compEffectiveValueInr = effectiveValue && !effectiveValue.excluded ? effectiveValue.netInr : null;
+
+  const hireabilityConfidence = scoreIndiaHireability({ jdText: jdText || '', companyHasIndiaEntity: indiaEntity, mentionsEOR: mentionsEor });
+
+  const heat = typeof companySignal?.heat === 'number' ? companySignal.heat : null;
+  const layoffRisk = typeof companySignal?.layoff_risk === 'number' ? companySignal.layoff_risk : null;
+
+  // The blended rank needs domain fit AND comp AND (optionally) stability —
+  // only compute it when the inputs that actually matter are present, rather
+  // than silently substituting defaults that would misrepresent an unscored
+  // signal as a neutral one.
+  let fitRank = null;
+  if (domainFitScore !== null && compEffectiveValueInr !== null) {
+    const blended = blendRank({
+      domainFit: domainFitScore,
+      netEffectiveValueInr: compEffectiveValueInr,
+      hireability: hireabilityConfidence,
+      heat: heat ?? 50,
+      layoffRisk: layoffRisk ?? 0,
+    });
+    fitRank = blended.excluded ? 0 : blended.rank;
+  }
+
+  return {
+    domain_fit_score: domainFitScore,
+    comp_effective_value_inr: compEffectiveValueInr,
+    india_hireability_confidence: hireabilityConfidence,
+    fit_rank: fitRank,
+  };
+}
+
 function clamp0to100(n) {
   const v = Number(n);
   if (!Number.isFinite(v)) return 0;
@@ -309,6 +370,43 @@ async function runSelfTest() {
   const fxFailing = await fetchFxRatesToInr({ fetchImpl: async () => { throw new Error('network down'); } });
   assertEqual(fxFailing, FALLBACK_FX_TO_INR, 'fetchFxRatesToInr falls back to static table on failure, never throws');
 
+  // scorePosting(): full-data case — every field populated, fit_rank computed.
+  const fullScore = scorePosting({
+    jdText: 'Zero Trust VPN endpoint security engineer, C++, UEFI',
+    compAmount: 150_000,
+    compCurrency: 'USD',
+    compKind: 'cash',
+    fxRatesToInr: { USD: 87 },
+    companySignal: { heat: 70, layoff_risk: 10 },
+  });
+  assert(fullScore.domain_fit_score !== null && fullScore.domain_fit_score >= DOMAIN_FIT_GATE_THRESHOLD, 'scorePosting: on-domain JD produces a real domain_fit_score');
+  assert(fullScore.comp_effective_value_inr !== null && fullScore.comp_effective_value_inr > 0, 'scorePosting: comp produces a real net-INR value');
+  assert(typeof fullScore.india_hireability_confidence === 'number', 'scorePosting: hireability is always a number, never null (weighted baseline, not unknown-state)');
+  assert(fullScore.fit_rank !== null && fullScore.fit_rank > 0, 'scorePosting: fit_rank computed when domain fit + comp are both present');
+
+  // scorePosting(): comp missing -> comp_effective_value_inr and fit_rank are
+  // null, but domain_fit_score/hireability still compute (partial degrade).
+  const noComp = scorePosting({ jdText: 'Zero Trust VPN endpoint security engineer, C++, UEFI' });
+  assertEqual(noComp.comp_effective_value_inr, null, 'scorePosting: missing comp -> comp_effective_value_inr is null, not estimated');
+  assertEqual(noComp.fit_rank, null, 'scorePosting: missing comp -> fit_rank withheld rather than computed on an assumed default');
+  assert(noComp.domain_fit_score !== null, 'scorePosting: domain_fit_score still computes without a comp figure');
+
+  // scorePosting(): no JD text -> domain_fit_score null, fit_rank withheld.
+  const noJd = scorePosting({ compAmount: 100_000, compCurrency: 'USD', fxRatesToInr: { USD: 87 } });
+  assertEqual(noJd.domain_fit_score, null, 'scorePosting: missing JD text -> domain_fit_score is null, never defaulted to 0 and silently gated');
+  assertEqual(noJd.fit_rank, null, 'scorePosting: missing JD text -> fit_rank withheld');
+
+  // scorePosting(): company never signal-scored -> heat/layoffRisk default
+  // neutrally inside blendRank, never throws, never blocks fit_rank.
+  const noSignal = scorePosting({
+    jdText: 'Embedded kernel driver, endpoint encryption, C++',
+    compAmount: 100_000,
+    compCurrency: 'USD',
+    fxRatesToInr: { USD: 87 },
+    companySignal: null,
+  });
+  assert(noSignal.fit_rank !== null, 'scorePosting: an unscored company (no signal record) still produces a fit_rank via neutral heat/risk defaults');
+
   if (process.exitCode === 1) {
     console.error('\nSelf-test FAILED');
   } else {
@@ -318,11 +416,54 @@ async function runSelfTest() {
 
 // ── CLI ──────────────────────────────────────────────────────────────────────
 
+function parseArg(args, flag) {
+  const idx = args.indexOf(flag);
+  return idx !== -1 ? args[idx + 1] : undefined;
+}
+
+async function runScoreCli(args) {
+  const company = parseArg(args, '--company');
+  if (!company) {
+    console.error('Usage: node compute-fit.mjs --score --company "Name" [--jd-text "..." | --jd-text-file path] [--comp-amount N --comp-currency USD --comp-kind cash] [--india-entity] [--mentions-eor]');
+    process.exitCode = 1;
+    return;
+  }
+
+  let jdText = parseArg(args, '--jd-text');
+  const jdTextFile = parseArg(args, '--jd-text-file');
+  if (!jdText && jdTextFile) {
+    try {
+      jdText = readFileSync(jdTextFile, 'utf-8');
+    } catch (err) {
+      console.error(`compute-fit: could not read --jd-text-file ${jdTextFile}: ${err.message}`);
+      process.exitCode = 1;
+      return;
+    }
+  }
+
+  const compAmountRaw = parseArg(args, '--comp-amount');
+  const compAmount = compAmountRaw !== undefined ? Number(compAmountRaw) : undefined;
+  const compCurrency = parseArg(args, '--comp-currency') ?? 'USD';
+  const compKind = parseArg(args, '--comp-kind') ?? 'cash';
+  const indiaEntity = args.includes('--india-entity');
+  const mentionsEor = args.includes('--mentions-eor');
+
+  const fxRatesToInr = compAmount !== undefined ? await fetchFxRatesToInr() : FALLBACK_FX_TO_INR;
+  const companySignal = readCompanySignal(company);
+
+  const result = scorePosting({ jdText, compAmount, compCurrency, compKind, indiaEntity, mentionsEor, fxRatesToInr, companySignal });
+  console.log(JSON.stringify(result, null, 2));
+}
+
 if (process.argv[1] && process.argv[1].endsWith('compute-fit.mjs')) {
-  if (process.argv.includes('--self-test')) {
+  const args = process.argv.slice(2);
+  if (args.includes('--self-test')) {
     runSelfTest();
+  } else if (args.includes('--score')) {
+    runScoreCli(args);
   } else {
-    console.log('Usage: node compute-fit.mjs --self-test');
-    console.log('This module is primarily a library — import its functions from an evaluation script.');
+    console.log('Usage:');
+    console.log('  node compute-fit.mjs --self-test');
+    console.log('  node compute-fit.mjs --score --company "Name" [--jd-text "..." | --jd-text-file path] [--comp-amount N --comp-currency USD --comp-kind cash] [--india-entity] [--mentions-eor]');
   }
 }

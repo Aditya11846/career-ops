@@ -49,6 +49,13 @@ const MACHINE_SUMMARY_FIELDS = new Set([
   'via',
   'company_confidential',
   'risk_summary',
+  // compute-fit.mjs's additive per-posting signals (see batch-prompt.md's
+  // Machine Summary schema) — registered so a future outcome-correlation pass
+  // can use them instead of them being silently dropped here.
+  'domain_fit_score',
+  'comp_effective_value_inr',
+  'india_hireability_confidence',
+  'fit_rank',
 ]);
 
 // --- CLI args ---
