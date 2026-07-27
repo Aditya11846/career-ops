@@ -176,9 +176,42 @@ export function scoreIndiaHireability({ jdText = '', companyHasIndiaEntity = fal
 // agent-supplies-the-nuanced-signal pattern as compute-heat.mjs's
 // --funding/--reddit/--linkedin flags) rather than relying on this heuristic
 // alone — keyword matching is a floor, not a replacement for reading the JD.
+// Grounded directly in cv.md's real content, not just the three specializations
+// named when this domain was first framed — a real live test (report 001,
+// Broadcom Staff Security Engineer) showed the narrower original list scored a
+// genuinely relevant, in-history-with-the-company role at only 12/20, purely
+// because the JD used general security vocabulary ("vulnerability," "threat,"
+// "incident response") that wasn't recognized, not because the role is a
+// mismatch. This heuristic can only ever approximate "could he actually do
+// this job" via keyword matching (the real judgment is the LLM evaluation's
+// Block B, CV Match) — the fix is broadening the vocabulary to match what's
+// actually on his resume, not building a smarter classifier.
 const DOMAIN_KEYWORDS = {
-  strong: ['zero trust', 'endpoint encryption', 'endpoint security', 'dlp', 'data loss prevention', 'uefi', 'kernel driver', 'embedded systems', 'rtos', 'vpn', 'disk encryption', 'tcg opal', 'sdk architecture'],
-  moderate: ['c++', 'embedded', 'firmware', 'security engineer', 'systems engineer', 'network security', 'cryptography', 'encryption'],
+  // Core specializations + general security-engineering vocabulary his 22-year
+  // career actually spans (encryption/DLP work at Symantec, current-era Zero
+  // Trust work at Akamai, plus the broader vulnerability/incident-response
+  // vocabulary the live Broadcom test proved was missing).
+  strong: [
+    'zero trust', 'endpoint encryption', 'endpoint security', 'dlp', 'data loss prevention',
+    'uefi', 'kernel driver', 'embedded systems', 'rtos', 'vpn', 'disk encryption', 'tcg opal', 'sdk architecture',
+    'vulnerability', 'incident response', 'penetration testing', 'malware', 'threat', 'exploit',
+    'cyber security', 'cybersecurity', 'application security', 'product security', 'security architecture', 'secure boot',
+  ],
+  // General technical range actually on his CV (compilers/VLIW at Synergy,
+  // caching/virtualization/NoSQL at PrimaryIO, IoT/cloud at KOKO, mobile SDKs
+  // at Nuance/Aztecsoft) — real, but broader than the core specializations.
+  moderate: [
+    'c++', 'embedded', 'firmware', 'security engineer', 'systems engineer', 'network security', 'cryptography', 'encryption',
+    'compiler', 'distributed systems', 'cloud computing', 'virtualization', 'iot', 'kernel', 'driver',
+    'real-time', 'socket programming', 'multithreading', 'mobile sdk',
+  ],
+  // Specific languages/tools on his CV — real evidence he could contribute
+  // technically, but common enough across unrelated domains that a match here
+  // alone should never carry a posting past the gate by itself.
+  general: [
+    'python', 'java', 'golang', 'kotlin', 'swift', 'objective-c', 'c#',
+    'tcp/ip', 'android', 'ios', 'linux kernel', 'bluetooth',
+  ],
 };
 
 export function scoreDomainFit(jdText = '') {
@@ -186,6 +219,7 @@ export function scoreDomainFit(jdText = '') {
   let score = 0;
   for (const kw of DOMAIN_KEYWORDS.strong) if (text.includes(kw)) score += 15;
   for (const kw of DOMAIN_KEYWORDS.moderate) if (text.includes(kw)) score += 6;
+  for (const kw of DOMAIN_KEYWORDS.general) if (text.includes(kw)) score += 3;
   return clamp0to100(score);
 }
 
@@ -354,6 +388,19 @@ async function runSelfTest() {
   // Domain fit + gate.
   assert(scoreDomainFit('Great ping pong table and free snacks, sales role.') < DOMAIN_FIT_GATE_THRESHOLD, 'irrelevant JD scores below the gate');
   assert(scoreDomainFit('Build our Zero Trust VPN and endpoint encryption stack in C++, UEFI kernel driver work.') >= DOMAIN_FIT_GATE_THRESHOLD, 'on-domain JD clears the gate');
+
+  // Real-data regression: report 001's actual Broadcom JD text (fetched live
+  // from Workday's API, 2026-07-27) scored 12/20 under the original narrow
+  // keyword list — a real bug, not a synthetic example. The broadened list
+  // must clear the gate on this exact text.
+  const REAL_BROADCOM_JD = `Staff Security Engineer. Broadcom VMware Cloud Foundation (VCF) SCOPE team defends products, services and supply chains against nation state actors. Security Engineers responsible for triage, investigation, management and communication of security vulnerabilities reported by external researchers. Assess threats, analyze externally reported vulnerabilities, support teams providing vulnerability mitigations, virtual patches, workarounds, fix recommendations. Author VMware Security Response Center (vSRC) communications including security advisories. Use Claude Code or similar AI agentic coding tools. Design AI agentic workflows to triage and assess incoming reports. Build multi-step reasoning AI agents for autonomous static analysis, dynamic scanning, automated patch generation. Tools: Blackduck, Burp, Nessus, Coverity, vulnhub, GHSA, openwall. Assess OSS vulnerabilities for VCF products. Proficient in Python and at least one of C/C++ or Java. Bachelor's degree Computer Science and 8+ years experience or Masters and 6+ years.`;
+  const realBroadcomScore = scoreDomainFit(REAL_BROADCOM_JD);
+  assert(realBroadcomScore >= DOMAIN_FIT_GATE_THRESHOLD, `real Broadcom JD (was 12/20 under the old list) now clears the gate — got ${realBroadcomScore}`);
+
+  // Real-data regression: a clearly irrelevant title from the same live scan
+  // (data/pipeline-filtered.md) must still score near zero — confirms this is
+  // a real widening, not an accidental "let everything through."
+  assert(scoreDomainFit('Account Executive - Enterprise Sales, quota, CRM, customer relationship management') < DOMAIN_FIT_GATE_THRESHOLD, 'a real irrelevant sales title still scores below the gate after broadening');
 
   // Blend rank: domain gate excludes regardless of how good other signals are.
   const gated = blendRank({ domainFit: 5, netEffectiveValueInr: 10_000_000, hireability: 100, heat: 100, layoffRisk: 0 });
