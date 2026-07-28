@@ -123,10 +123,19 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
     [enriched, hidden, within, sources, seniorities, locQ, kw],
   );
 
-  // 🔴 SINGLE ORDER PLUG POINT — freshness only (newest first_seen first; unknown last).
-  // A smarter ranker replaces ONLY this comparator; facets/triage/shortlist/score never
-  // touch relevance. This is the whole firewall in one line.
-  const ordered = useMemo(() => [...filtered].sort((a, b) => (a.age ?? Infinity) - (b.age ?? Infinity)), [filtered]);
+  // 🔴 SINGLE ORDER PLUG POINT — fit rank first (score-inbox.mjs's cheap
+  // domain-fit + company-stability rank; unscored last, never treated as
+  // zero), freshness as the tiebreaker within/below that.
+  // facets/triage/shortlist/the token-spending evaluate score never touch relevance.
+  const ordered = useMemo(
+    () =>
+      [...filtered].sort((a, b) => {
+        const rankDiff = (b.job.fitRank ?? -Infinity) - (a.job.fitRank ?? -Infinity);
+        if (rankDiff !== 0) return rankDiff;
+        return (a.age ?? Infinity) - (b.age ?? Infinity);
+      }),
+    [filtered],
+  );
 
   const anyFacet = within != null || sources.size > 0 || seniorities.size > 0 || locQ.trim() !== "" || kw.trim() !== "";
   const capped = !showAll && !anyFacet;

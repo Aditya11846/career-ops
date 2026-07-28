@@ -259,6 +259,31 @@ export function blendRank({ domainFit, netEffectiveValueInr, hireability, heat =
   return { rank, excluded: false, effectiveValueScore, stabilityScore };
 }
 
+const INBOX_RANK_WEIGHTS = { domainFit: 0.6, stability: 0.4 };
+
+/**
+ * Cheap, inbox-time ranker — deliberately simpler than blendRank(), which
+ * requires a real comp figure to mean anything. Raw scanned postings almost
+ * never carry one, so this only ever combines domain fit (title+location,
+ * available for every provider) and company stability (heat - layoffRisk,
+ * from signal-agent's stored data, null if never scored) — never touches
+ * blendRank()'s own evaluation-time logic or weights.
+ *
+ * No gate here — filter-inbox-by-fit.mjs's own (much lower, title-calibrated)
+ * TITLE_FIT_MIN_SCORE threshold already decided which entries reach
+ * data/pipeline.md's Pending section at all. Re-gating at
+ * DOMAIN_FIT_GATE_THRESHOLD (calibrated for full JD text, not a title) here
+ * would wrongly null out most entries that already correctly passed the
+ * cheaper bar — this function only ranks what's already there.
+ *
+ * @param {{domainFit:number, heat?:number|null, layoffRisk?:number|null}} input
+ */
+export function computeInboxRank({ domainFit, heat = null, layoffRisk = null }) {
+  const stabilityScore = clamp0to100((heat ?? 50) - (layoffRisk ?? 0) + 50);
+  const rank = Math.round(clamp0to100(domainFit) * INBOX_RANK_WEIGHTS.domainFit + stabilityScore * INBOX_RANK_WEIGHTS.stability);
+  return { rank, stabilityScore };
+}
+
 // ── Combined per-posting scorer (CLI entry point) ───────────────────────────
 
 /**
@@ -453,6 +478,19 @@ async function runSelfTest() {
     companySignal: null,
   });
   assert(noSignal.fit_rank !== null, 'scorePosting: an unscored company (no signal record) still produces a fit_rank via neutral heat/risk defaults');
+
+  // computeInboxRank(): no gate (filter-inbox-by-fit.mjs already gated at a
+  // much lower bar before an entry reaches this point), higher domain fit and
+  // better stability both increase rank, missing signal never throws.
+  const lowFitRank = computeInboxRank({ domainFit: 6 });
+  assert(lowFitRank.rank !== null && lowFitRank.rank > 0, 'computeInboxRank: low domain fit (below the JD-calibrated gate) still ranks, never nulled out');
+  const higherFitRank = computeInboxRank({ domainFit: 30 });
+  assert(higherFitRank.rank > lowFitRank.rank, 'computeInboxRank: higher domain fit increases rank, all else equal');
+  const goodStability = computeInboxRank({ domainFit: 20, heat: 90, layoffRisk: 0 });
+  const badStability = computeInboxRank({ domainFit: 20, heat: 10, layoffRisk: 80 });
+  assert(goodStability.rank > badStability.rank, 'computeInboxRank: better company stability increases rank, all else equal');
+  const neverScored = computeInboxRank({ domainFit: 20 });
+  assert(neverScored.rank !== null, 'computeInboxRank: a company with no stored signal (heat/layoffRisk both null) still ranks via neutral defaults');
 
   if (process.exitCode === 1) {
     console.error('\nSelf-test FAILED');

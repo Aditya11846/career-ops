@@ -75,8 +75,17 @@ export function TriageRow({
           {job.location && <span className="truncate">{job.location}</span>}
           {source && <span className="rounded bg-surface-hover px-1 py-px font-medium text-muted">{ATS_LABEL[source]}</span>}
           {ago && <span>{ago}</span>}
-          {/* 🔴 CRUDA: honest "not scored" — no fabricated match%. */}
-          {!evaluated && <span className="italic text-muted">not scored</span>}
+          {/* Cheap inbox-time fit rank (score-inbox.mjs) — domain fit +
+              company stability only, distinct from the token-spending
+              EVALUADA score on the right. Never fabricated: absent when the
+              posting hasn't been through score-inbox.mjs yet. */}
+          {typeof job.fitRank === "number" ? (
+            <span className="rounded bg-surface-hover px-1 py-px font-medium text-muted" title="Fit rank — domain fit + company stability, not a full evaluation">
+              fit {job.fitRank}
+            </span>
+          ) : (
+            !evaluated && <span className="italic text-muted">not scored</span>
+          )}
         </p>
       </div>
 

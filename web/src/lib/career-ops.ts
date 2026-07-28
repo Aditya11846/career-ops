@@ -45,7 +45,7 @@ function read(rel: string): string | null {
   }
 }
 
-export type InboxJob = { url: string; company: string; role: string; location?: string; compensation?: string; done: boolean; postedAt?: string };
+export type InboxJob = { url: string; company: string; role: string; location?: string; compensation?: string; done: boolean; postedAt?: string; fitRank?: number | null };
 
 /** Parse data/pipeline.md — `- [ ] URL | Company | Role [| Location [| Compensation]]`.
  *  Positional split (NOT a greedy trailing group): the optional 4th `location`
@@ -60,16 +60,42 @@ export function readInbox(): InboxJob[] {
     if (!m) continue;
     const parts = m[2].split("|").map((s) => s.trim());
     if (parts.length < 3 || !parts[0]) continue; // need at least url | company | role
+    // A trailing "posted: YYYY-MM-DD" segment (written by scan.mjs's
+    // appendToPipeline) is NOT compensation -- postedAt is already joined
+    // separately from data/scan-history.tsv below. Without this check it
+    // silently lands here as garbage text (confirmed: 111/142 real rows).
+    const rawCompensation = parts[4] || undefined;
+    const compensation = rawCompensation && /^posted:\s*\d{4}-\d{2}-\d{2}$/.test(rawCompensation) ? undefined : rawCompensation;
     jobs.push({
       done: m[1].toLowerCase() === "x",
       url: parts[0],
       company: parts[1],
       role: parts[2],
       location: parts[3] || undefined, // optional 4th column (#1015)
-      compensation: parts[4] || undefined, // optional 5th column (#1017); 6th+ ignored
+      compensation, // optional 5th column (#1017); 6th+ ignored
     });
   }
   return jobs;
+}
+
+/**
+ * Read data/posting-signals.json -> Map<url, fitRank>, written by
+ * score-inbox.mjs. Same tolerant-missing-file contract as readScanDates():
+ * no file -> empty map, a malformed record is skipped, never thrown.
+ */
+export function readPostingSignals(): Map<string, number | null> {
+  const raw = read("data/posting-signals.json");
+  const ranks = new Map<string, number | null>();
+  if (!raw) return ranks;
+  try {
+    const parsed = JSON.parse(raw) as Record<string, { rank?: number | null }>;
+    for (const [url, record] of Object.entries(parsed)) {
+      ranks.set(url, typeof record?.rank === "number" ? record.rank : null);
+    }
+  } catch {
+    // malformed file -- treat as empty, never throw
+  }
+  return ranks;
 }
 
 /**
@@ -182,12 +208,14 @@ export type PipelineSummary = {
 export function pipelineSummary(): PipelineSummary {
   const root = careerOpsRoot();
   const scanDates = readScanDates();
+  const postingSignals = readPostingSignals();
   return {
     root,
     rootExists: fs.existsSync(root),
-    // join the freshness date (first_seen) onto each raw posting — the inbox's
-    // triage view orders/faceted-filters on it entirely client-side.
-    inbox: readInbox().map((j) => ({ ...j, postedAt: scanDates.get(j.url) })),
+    // join the freshness date (first_seen) and the cheap fit rank (from
+    // score-inbox.mjs) onto each raw posting — the inbox's triage view
+    // orders/faceted-filters on both entirely client-side.
+    inbox: readInbox().map((j) => ({ ...j, postedAt: scanDates.get(j.url), fitRank: postingSignals.get(j.url) ?? null })),
     applications: readApplications(),
   };
 }
