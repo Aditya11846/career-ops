@@ -70,6 +70,19 @@ This command call is what actually writes to data/company-signals.json — do no
 
 End with EXACTLY one final line: VERDICT: {number of companies scored}/5 — {company: heat score pairs, ≤20 words}`;
   }
+  if (kind === "contacto") {
+    return `You are running the REAL career-ops "contacto" mode, headless, on the user's own machine — find real people to reach out to for a specific application, and draft outreach messages. Do NOT improvise a different approach.
+
+1. Read modes/contacto.md and follow the "LinkedIn power move" flow EXACTLY (not the Greeting variant — this always has a specific application). Ground it in THIS person: read cv.md, config/profile.yml (including contact_preferences), and the evaluation report at reports/${input}-*.md for the company/role/JD context.
+2. Use WebSearch to identify real candidate contacts: hiring manager, assigned recruiter, 2-3 team peers, interviewer (if scheduled). Never fabricate a name — if you can't find a real person for a slot, skip that slot and say so.
+3. For each REAL person found, classify contact type and draft the message per modes/contacto.md's persona engine (≤300 chars, no corporate-speak, never share a phone number).
+4. For each REAL person found, add them to the relationship tracker by running: \`node relationships.mjs --add --name "{Full Name}" --role "{their role/title}" --company "{Company}" --notes "{contact type}: {the drafted message, verbatim}"\` — this is the ONLY way to persist a contact; never edit data/relationships.md directly.
+5. NEVER send, submit, or click anything. This is research + draft-only — the user copies and sends manually themselves.
+
+End with EXACTLY one final line: VERDICT: {number of real contacts found and added}/5 — {names + contact types, ≤20 words}
+
+Application #: ${input}`;
+  }
   if (kind === "fix-portal") {
     return `A company's job-portal ATS slug is BROKEN — career-ops can no longer scan it, so it silently disappears from every future scan. Repair it (headless, on the user's machine):
 1. Run \`node verify-portals.mjs --add "${input}"\` — it probes Greenhouse/Ashby/Lever for the company's correct ATS slug and prints the suggested ats + slug.
@@ -126,7 +139,7 @@ export async function POST(req: Request) {
 
   // These run the REAL core (modes/scripts), not just data — fail clearly if the
   // root is incomplete instead of faking it.
-  const needsScript: Record<string, string> = { evaluate: "modes/oferta.md", "fix-portal": "verify-portals.mjs", "widen-watchlist": "verify-portals.mjs", "compute-heat": "signal-agent/compute-heat.mjs", pdf: "generate-pdf.mjs" };
+  const needsScript: Record<string, string> = { evaluate: "modes/oferta.md", "fix-portal": "verify-portals.mjs", "widen-watchlist": "verify-portals.mjs", "compute-heat": "signal-agent/compute-heat.mjs", contacto: "modes/contacto.md", pdf: "generate-pdf.mjs" };
   const required = needsScript[kind];
   if (required && !fs.existsSync(path.join(careerOpsRoot(), required))) {
     return new Response(
@@ -156,7 +169,7 @@ export async function POST(req: Request) {
   // report). 'research' stays read-only. Task (sub-agents) is always blocked
   // (runaway cost). NEVER auto-submits — that is a prompt-level guarantee.
   const tools =
-    kind === "evaluate" || kind === "fix-portal" || kind === "widen-watchlist" || kind === "compute-heat" || kind === "pdf"
+    kind === "evaluate" || kind === "fix-portal" || kind === "widen-watchlist" || kind === "compute-heat" || kind === "contacto" || kind === "pdf"
       ? { allowed: "Read,WebFetch,WebSearch,Write,Edit,Bash,Glob,Grep", disallowed: "Task,NotebookEdit" }
       : { allowed: "Read,WebFetch,WebSearch,Glob,Grep", disallowed: "Bash,Write,Edit,NotebookEdit,Task" };
   const args = isClaude

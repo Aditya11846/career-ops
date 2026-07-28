@@ -30,6 +30,7 @@ const FILES = [
   { src: 'portals.yml', name: `portals-${DATE}.yml` },
   { src: 'cv.md', name: `cv-${DATE}.md` },
   { src: 'config/profile.yml', name: `profile-${DATE}.yml` },
+  { src: 'data/relationships.md', name: `relationships-${DATE}.md` },
 ];
 
 if (!existsSync(SNAPSHOT_DIR)) mkdirSync(SNAPSHOT_DIR, { recursive: true });

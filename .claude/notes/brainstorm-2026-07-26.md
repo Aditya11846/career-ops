@@ -356,3 +356,25 @@ Notably, discovery mode surfaced better/different candidates than the earlier ha
 
 **Consistent with `AGENTS.md`'s Data Contract:** `relationships.mjs` documented in the Main Files table as a System Layer file; `data/relationships.md` documented as User Layer (gitignored, PII).
 
+## 11. contacto turned on — actual person-finding + draft outreach (2026-07-28)
+
+**Real gap Aditya caught immediately:** after §10 shipped, he asked "so the refresh company signals finds actual referals?" — correctly noticing that `compute-heat` is company-level only (funding/GitHub/Reddit/LinkedIn *chatter*), not person-level. He then stated the actual point plainly: "no i want a center that finds these people, and the also drafgts message them." This is a distinct, pre-existing mode (`modes/contacto.md` — "LinkedIn power move": WebSearch for hiring manager/recruiter/peers/interviewer tied to a specific application, classify, draft a ≤300-char message per persona) that, like `signal-agent`, existed in the repo and had never been wired into the dashboard.
+
+**Hard boundary stated up front, not negotiated:** drafting only, never auto-sending — this isn't a scope choice, it's this app's own standing safety rule (sending a message on the user's behalf requires explicit per-action confirmation in chat; nothing here can bypass that). `modes/contacto.md` was already designed this way independently.
+
+**Scoped via two AskUserQuestion confirmations:** (1) trigger surface = a "Find contacts" button on each evaluation report page (report already carries the company/role/JD context contacto needs — the alternative, a free-text company/role box on `/relationships`, was rejected as worse since it'd require re-typing what a report already has), (2) found contacts auto-add to the relationship tracker with the drafted message saved in Notes (closes the loop with §10's build rather than being a disconnected research tool).
+
+**Built:**
+- New `kind: "contacto"` in `run/route.ts` — deliberately does NOT duplicate `modes/contacto.md`'s persona-engine text inline (unlike the widen-watchlist/compute-heat cron scripts, which DO duplicate `run/route.ts`'s prompts for standalone operation) — instead instructs the agent to read and follow the real mode file directly, same pattern `evaluate` already uses for `modes/oferta.md`. Lower drift risk than duplicating persona-engine prose that's more likely to be hand-edited later.
+- `FindContactsButton` component (mirrors `GeneratePdfButton`'s exact running/done/idle shape), wired into `report-view.tsx` next to the existing PDF/Apply buttons.
+- The prompt's step 4 requires the agent to persist each found contact via `node relationships.mjs --add` (never edit `data/relationships.md` directly) — same discipline as `compute-heat` never writing `company-signals.json` directly.
+
+**Real end-to-end test against report #001 (Broadcom, Staff Security Engineer, Cork) — genuinely good result, not a rubber-stamp:**
+- Found 2 real people via WebSearch: Egan Meek (Peer, Principal Security Engineer/Offensive Security, ex-VMware) and Rachel Pullman (Recruiter, Technical Recruiter) — both drafted messages fit the 300-char budget, correctly persona-differentiated (peer message references his actual career move + asks a genuine technical question, no job ask; recruiter message leads with hard-requirements fit + explicit CTA).
+- **Correctly SKIPPED a third candidate** (a plausible hiring-manager name) because further research showed his current employer was First Advantage, not Broadcom — used stale info as a reason NOT to include a contact rather than including it anyway. This is the same "honest zero, not a guess" discipline `signal-agent`/`widen-watchlist` already demonstrated elsewhere.
+- Correctly flagged uncertainty in Rachel Pullman's notes (her LinkedIn profile reads US/semiconductor-focused, not confirmed as the actual EMEA/security-req owner) rather than presenting it as settled.
+- Confirmed persisted correctly in `data/relationships.md` AND joined correctly with the real Broadcom heat score (74) from §10's test in the `/api/relationships` response.
+- Cost: $1.08, 77.6k tokens, 14 WebSearch calls.
+- Button verified rendering correctly on the actual report page (`/pipeline/001`) via a real browser screenshot; not re-triggered through the UI a second time (the click→job-store→API wiring is identical, already-proven code to the PDF/Widen-watchlist buttons — re-running would just spend another ~$1 to prove the same plumbing twice).
+- **Test output kept, not cleared** — confirmed explicitly with Aditya (AskUserQuestion): these are real, honestly-verified contacts with usable drafts, not throwaway smoke-test data.
+

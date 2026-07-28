@@ -10,6 +10,7 @@ import { CompanyLogo } from "@/components/company-logo";
 import { ScoreMethodology } from "@/components/score-methodology";
 import { GeneratePdfButton } from "@/components/generate-pdf-button";
 import { ApplyButton } from "@/components/apply-button";
+import { FindContactsButton } from "@/components/find-contacts-button";
 import { DeleteFromTracker } from "@/components/delete-from-tracker";
 
 // Progressive disclosure of the report. The core writes prose blocks
@@ -124,6 +125,7 @@ export function ReportView({
           {app && <StatusSelect n={id} current={app.status} />}
           <GeneratePdfButton n={id} company={app?.company ?? meta?.title ?? id} pdfReady={(app?.pdf ?? "").includes("✅")} />
           <ApplyButton n={id} url={url && url.startsWith("http") ? url : undefined} company={app?.company ?? meta?.title ?? id} pdfReady={(app?.pdf ?? "").includes("✅")} />
+          <FindContactsButton n={id} company={app?.company ?? meta?.title ?? id} />
         </div>
 
         {app && canDelete && (
