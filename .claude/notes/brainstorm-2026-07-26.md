@@ -244,8 +244,33 @@ Real git history is the actual source of truth for what changed (`git log`); thi
 **Current live state:** 13 companies scanning, 142 postings in the active pipeline after domain-fit triage.
 
 ### Next steps, in agreed priority order (2026-07-28)
-1. **Make scoring visible in the UI** — `fit_rank`/`comp_effective_value_inr`/etc. currently only exist as raw JSON in a collapsed "Technical" section per report; need a real sortable/filterable ranked view on the pipeline itself.
-2. **Widen the watchlist further** — the two-cadence refresh idea (periodic Gartner/G2 category pages + funding news) to find new companies beyond the ~14 hand-picked ones, instead of manually researching one at a time.
-3. **Automate the cadence** — wire `scan.mjs` + `filter-inbox-by-fit.mjs` into `/loop`/`/schedule` once the ranked view (step 1) makes the output worth checking regularly.
+1. ~~Make scoring visible in the UI~~ — **done, see §6 below.**
+2. **Widen the watchlist further** *(up next)* — the two-cadence refresh idea (periodic Gartner/G2 category pages + funding news) to find new companies beyond the ~14 hand-picked ones, instead of manually researching one at a time.
+3. **Automate the cadence** — wire `scan.mjs` + `filter-inbox-by-fit.mjs` (+ now `score-inbox.mjs`) into `/loop`/`/schedule` now that the ranked view (step 1) makes the output worth checking regularly.
 4. **Outreach/relationships** — still deliberately parked per `relationship-pipeline-critique.md`'s own reasoning; only build if a spreadsheet proves to be the real bottleneck after actual use.
+
+---
+
+## 6. Build log, continued — 2026-07-28 (scoring visibility pass)
+
+### Problem → decision → why (flow, not just outcome)
+
+**Problem:** `compute-fit.mjs`'s signals only existed attached to a full evaluation report's Machine Summary. Only 1 of 142 pending postings had ever been evaluated — the Inbox tab had nothing to sort by except freshness.
+
+**Decision 1 — don't reuse `blendRank()` for inbox-time ranking.** `blendRank()` requires a real comp figure to mean anything; raw scanned postings essentially never carry one (confirmed: 0/142). Building a *separate*, simpler `computeInboxRank()` (domain-fit + company-stability only) kept the evaluation-time ranking logic (used once a real report exists) completely untouched, rather than forcing `blendRank()` to handle a case it wasn't designed for.
+
+**Decision 2 — no re-gating inside `computeInboxRank()`.** First draft reused `DOMAIN_FIT_GATE_THRESHOLD` (20, calibrated for full JD text) as a gate here too — caught in review before shipping: `filter-inbox-by-fit.mjs` already gates entries into `pipeline.md` at a much lower, title-calibrated bar (`TITLE_FIT_MIN_SCORE = 1`). Re-gating at 20 would have wrongly nulled out almost every already-correctly-included entry — the exact shape of bug the original Broadcom domain-fit miscalibration was. Fixed by removing the gate entirely: this function only ranks what already passed the real gate upstream.
+
+**Decision 3 — new store, not a new `pipeline.md` column.** Considered appending a 6th pipe-delimited field to each inbox line for the score. Rejected: `scan.mjs`'s `loadSeenUrls()` and other scripts already parse that line format; a positional change risks silent breakage elsewhere. Instead followed the established `readScanDates()` → `pipelineSummary()` join pattern (same technique already used for `postedAt`) — a separate URL-keyed JSON store (`data/posting-signals.json`), read and joined in-memory, `pipeline.md` itself untouched.
+
+**Real bug found and fixed along the way, not part of the original plan:** `readInbox()` was mis-assigning `scan.mjs`'s trailing `"posted: YYYY-MM-DD"` label as `compensation` for 111 of 142 real rows (confirmed never consumed anywhere in the web app — silent, harmless-so-far, but real corruption). Fixed while touching this exact function.
+
+### What shipped (`bdabcda`)
+- `compute-fit.mjs`: `computeInboxRank({domainFit, heat, layoffRisk})`, self-tested.
+- `score-inbox.mjs` (new): runs after `filter-inbox-by-fit.mjs`, scores all pending entries, writes `data/posting-signals.json` (gitignored).
+- `web/src/lib/career-ops.ts`: `readPostingSignals()`, `InboxJob.fitRank`, the compensation-parsing fix.
+- `InboxTriage.tsx`: sort comparator now fit-rank-primary, freshness-secondary (was freshness-only) — using the file's own documented single extension point.
+- `TriageRow.tsx`: `fit N` badge replaces "not scored" once a posting has a rank.
+
+**Verified live, by Aditya in a real browser, not just automated checks:** confirmed working on `/pipeline`.
 
