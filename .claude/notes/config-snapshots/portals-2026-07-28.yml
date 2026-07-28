@@ -273,6 +273,50 @@ tracked_companies:
     enabled: true
     notes: "Zero Trust access/protection for critical infrastructure and IoT, overlap with embedded/kernel security archetype. Confirmed Lever API (10 real postings) during 2026-07-28 watchlist-widening pass."
 
+  - name: NetBird
+    # Found via Zero Trust remote access funding/market research, not the
+    # original hand-picked list.
+    careers_url: "https://netbird.io/careers"
+    api: "https://api.ashbyhq.com/posting-api/job-board/netbird"
+    provider: ashby
+    enabled: true
+    notes: "Open-source WireGuard-based Zero Trust network access, direct domain overlap. Confirmed Ashby API (11 real postings) during 2026-07-28 watchlist-widening pass."
+
+  - name: Cyberhaven
+    # Found via DLP/endpoint data protection market research, not the
+    # original hand-picked list.
+    careers_url: "https://www.cyberhaven.com/careers"
+    api: "https://api.ashbyhq.com/posting-api/job-board/cyberhaven"
+    provider: ashby
+    enabled: true
+    notes: "Endpoint DLP / insider risk, direct overlap with endpoint encryption/DLP archetype. Confirmed Ashby API (15 real postings, including a MacOS Endpoint role) during 2026-07-28 watchlist-widening pass."
+
+  - name: Nightfall AI
+    # Found via DLP vendor research, not the original hand-picked list.
+    careers_url: "https://nightfall.ai/careers"
+    api: "https://api.ashbyhq.com/posting-api/job-board/nightfall-ai"
+    provider: ashby
+    enabled: true
+    notes: "DLP platform with dedicated Endpoint team roles, direct overlap with endpoint encryption/DLP archetype. Confirmed Ashby API (20 real postings) during 2026-07-28 watchlist-widening pass."
+
+  - name: Sentra
+    # Found via data security/DSPM vendor research, not the original
+    # hand-picked list.
+    careers_url: "https://sentra.io/careers"
+    api: "https://api.ashbyhq.com/posting-api/job-board/sentra"
+    provider: ashby
+    enabled: true
+    notes: "Data security posture management (DSPM), adjacent to the endpoint encryption/DLP archetype. Confirmed Ashby API (3 real postings) during 2026-07-28 watchlist-widening pass."
+
+  - name: BigID
+    # Found via data security/privacy vendor research, not the original
+    # hand-picked list.
+    careers_url: "https://bigid.com/company/careers/"
+    api: "https://boards-api.greenhouse.io/v1/boards/bigid/jobs"
+    provider: greenhouse
+    enabled: true
+    notes: "Data intelligence/discovery and security platform, adjacent to the endpoint encryption/DLP archetype. Confirmed Greenhouse API (15 real postings) during 2026-07-28 watchlist-widening pass."
+
 # job_boards: intentionally empty for now — this search is company-watchlist-
 # driven (curated, narrow domain), not board-driven (see brainstorm notes,
 # "curated watchlist vs. open scanning" discussion).
