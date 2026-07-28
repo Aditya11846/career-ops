@@ -130,6 +130,10 @@ plan/
 
 # Web
 .career-ops-web/logo-cache/
+# Saved worker run logs -- can contain real names/drafted messages (same PII
+# class as data/relationships.md), and doubled as an unplanned recovery
+# backup during the 2026-07-28 data-loss incident. Never commit it.
+.career-ops-web/runs/
 
 # Cron automation runtime logs (generated, machine-local)
 .claude/notes/cron-logs/

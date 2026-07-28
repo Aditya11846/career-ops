@@ -47,10 +47,23 @@ export function RelationshipsView() {
     return runs[0];
   }, [jobs]);
 
-  // pick up the result once a "compute-heat" run finishes, without a manual refresh
+  // "Find contacts" jobs are started from a report page, not this one — the
+  // job-store is global (visible in the sidebar from any page), so a run
+  // finishing while the user is ON /relationships must still refresh this
+  // list. Track the newest DONE contacto job's id (not just status) so a
+  // second, later-finishing run also triggers a reload, not just the first.
+  const latestDoneContactoId = useMemo(() => {
+    const done = jobs.filter((j) => j.kind === "contacto" && j.status === "done").sort((a, b) => (b.endedAt ?? 0) - (a.endedAt ?? 0));
+    return done[0]?.id;
+  }, [jobs]);
+
+  // pick up the result once a "compute-heat" or "contacto" run finishes, without a manual refresh
   useEffect(() => {
     if (heatJob?.status === "done") reload();
   }, [heatJob?.status]);
+  useEffect(() => {
+    if (latestDoneContactoId) reload();
+  }, [latestDoneContactoId]);
 
   const overdueCount = entries.filter((e) => e.overdue).length;
   const sorted = [...entries].sort((a, b) => Number(b.overdue) - Number(a.overdue) || (a.daysUntilNextAction ?? Infinity) - (b.daysUntilNextAction ?? Infinity));
