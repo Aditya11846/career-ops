@@ -316,3 +316,25 @@ Real git history is the actual source of truth for what changed (`git log`); thi
 
 Notably, discovery mode surfaced better/different candidates than the earlier hand-run G2 pass did (Okta, Cato Networks, Illumio weren't on the original 7-candidate G2 list at all) — the agent's own research method found real, strong matches the manual approach missed. The 7-candidate G2 list (ThreatLocker resolved; Cynet, Safetica, Varonis, Elisity, Zero Networks, Cyolo still unconfirmed) remains parked, but is now lower-priority — running "Widen watchlist" again is likely more productive than manually chasing that specific list.
 
+**Re-run #2, same session (2026-07-28, `e74c46f`):** ran discovery mode again via curl — +3 companies: Tailscale (Greenhouse), Teleport (Ashby), Xage Security (Lever), all confirmed live, all ZTNA/microsegmentation. Honestly rejected StrongDM, NordLayer/Nord Security, Beyond Identity, Elisity (no live postings/unresolvable ATS). Watchlist → 24.
+
+## 9. Automation — daily scan cron + weekly widen-watchlist cron (2026-07-28)
+
+**Scope, per Aditya's direct instruction ("daily re-scan cron, plus rerun widen-watchlist weekly"):** two unattended jobs on his own Mac via **launchd** (chosen over crontab — launchd catches up on missed runs after sleep/wake, crontab silently skips them; relevant since this only runs while the laptop is awake, no hosting yet).
+
+**Schedule (confirmed with Aditya via AskUserQuestion before installing):**
+- Daily scan: midnight (`com.careerops.dailyscan.plist`) — `scan.mjs` → `filter-inbox-by-fit.mjs` → `score-inbox.mjs`. Zero LLM cost (deterministic scripts only), so safe to run unattended with no cost risk.
+- Weekly widen-watchlist: Monday 9:00 AM (`com.careerops.weeklywiden.plist`) — real `claude -p` call, real cost (~$1–1.30/run based on the 3 manual runs today), real WebSearch/WebFetch/Write/Edit tool use.
+
+**New files:**
+- `scripts/cron-daily-scan.sh` — thin wrapper, logs to `.claude/notes/cron-logs/daily-scan-{date}.log` (gitignored, runtime-generated).
+- `scripts/cron-weekly-widen.sh` — calls `claude -p` **directly**, independent of the Next.js dev server, so the weekly job doesn't silently no-op if `npm run dev` isn't running. Deliberately duplicates `web/src/app/api/run/route.ts`'s `buildPrompt(kind==="widen-watchlist", input="")` prompt text and exact tool-scope (`Read,WebFetch,WebSearch,Write,Edit,Bash,Glob,Grep` / disallow `Task,NotebookEdit`) verbatim — commented at the top of the script that it must be kept in sync if that branch ever changes. Detects whether `portals.yml` actually changed (hash before/after) before snapshotting+committing, so a "nothing confirmed" run doesn't create an empty commit.
+- **Auto-commit + auto-push confirmed explicitly with Aditya before enabling** (AskUserQuestion) — the weekly script snapshots `portals.yml` and pushes to `origin/main` unattended if it changes anything, matching the manual checkpoint habit used all session. Daily scan never touches git (read-only pipeline data, already gitignored).
+- Both `~/Library/LaunchAgents/com.careerops.*.plist` loaded via `launchctl load` and confirmed present via `launchctl list | grep careerops`.
+
+**Both scripts smoke-tested manually before being trusted to the schedule, not just assumed correct from the plist:**
+- Daily scan: ran clean, 190 pending entries scored, exit 0.
+- Weekly widen: ran clean standalone (no dev server running) — found+added 5 more companies (NetBird, Cyberhaven, Nightfall AI, Sentra, BigID), correctly rejected two false-domain-fits mid-run (Abnormal Security = email security, a "concentric" Greenhouse slug = physical executive protection, neither this domain), auto-committed and auto-pushed as designed (`6091470`). This was the 3rd widen-watchlist run today — cumulative: 8 companies from the UI/curl runs earlier + 5 more from this standalone test = **watchlist now 30 companies**.
+
+**Not yet solved, consistent with the standing note:** still laptop-dependent (launchd doesn't help if the Mac is fully off, only asleep). Real hosting remains the separate unscoped initiative.
+

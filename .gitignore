@@ -130,5 +130,8 @@ plan/
 # Web
 .career-ops-web/logo-cache/
 
+# Cron automation runtime logs (generated, machine-local)
+.claude/notes/cron-logs/
+
 apply-agent/session-store/*.json
 apply-agent/session-store/.profile-copy-*/
