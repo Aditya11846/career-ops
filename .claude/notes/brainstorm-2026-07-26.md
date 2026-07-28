@@ -296,7 +296,19 @@ Real git history is the actual source of truth for what changed (`git log`); thi
 
 ---
 
-## 8. Orchestrator agent — scoping (2026-07-28)
+## 8. Orchestrator agent — scoped and first piece shipped (2026-07-28)
 
-**New standing requirement, not previously scoped (see also the persistent project memory `project_careerops_orchestrator_vision.md`):** the dashboard needs a real embedded orchestrator agent (LLM-with-tools, WebSearch/WebFetch-equivalent) so Amit can run everything from the web app himself — no live Claude Code session required. Everything built so far (ATS verification, G2 research) has depended on Claude driving research interactively; that's a real gap against this target, not a finished feature.
+**New standing requirement (see also the persistent project memory `project_careerops_orchestrator_vision.md`):** the dashboard needs a real embedded orchestrator agent (LLM-with-tools, WebSearch/WebFetch-equivalent) so Amit can run everything from the web app himself — no live Claude Code session required. Everything built earlier this session (ATS verification, G2 research) had depended on Claude driving research interactively; that was a real gap against this target, not a finished feature.
+
+**Key discovery during scoping: most of this already existed.** `web/src/app/api/run/route.ts` already spawns `claude -p` with `WebFetch`/`WebSearch`/`Write`/`Edit`/`Bash` allowed for its `evaluate`/`fix-portal`/`pdf` kinds — real, live, headless research + file-editing triggered by a plain HTTP request, not something requiring me interactively. `fix-portal` was the near-exact precedent (verify + edit `portals.yml`, just scoped narrower — Greenhouse/Ashby/Lever only, fixing a known-broken slug, not discovering new companies or covering Workday/schema.org).
+
+**OmniRoute integration confirmed working live** (tested directly, not theorized): `CLAUDE_CONFIG_DIR=~/.claude/profiles/<profile> ANTHROPIC_AUTH_TOKEN=<any value> claude -p "..."` genuinely routes a non-interactive call through OmniRoute's local server — any non-empty token was accepted, no strict validation. Means the existing spawn-based architecture can get Claude-Pro-primary/DeepSeek-fallback for free via two env vars, zero new tool-calling code. **Wiring deferred at Aditya's explicit request** ("that was a question, don't need to wire it in now") — do this later, not forgotten.
+
+**Shipped and verified for real (`df390dc`):** new `kind: "widen-watchlist"` in `run/route.ts`, reusing `fix-portal`'s exact plumbing, extended to check Workday (which `verify-portals.mjs` misses) and schema.org markup as a fallback, plus true new-company discovery mode (empty input). New "Widen watchlist" button on `/portals`.
+
+**Real end-to-end test, not simulated:** triggered via a plain `curl` POST to `/api/run` (no Claude Code session driving it) against ThreatLocker. The agent independently: checked Greenhouse's API directly, confirmed 33 live postings, read `portals.yml`'s format, and edited it correctly — verdict: `1/5 — ThreatLocker (confirmed Greenhouse)`. Independently re-verified afterward: entry format correct, 33 live jobs confirmed via the real provider. **This is the first concrete instance of "Amit-shaped" capability — a task getting done through the app itself, not through me.**
+
+**Explicitly still unsolved, not glossed over:** this only runs wherever the Next.js server process is actually running (Aditya's machine, `npm run dev`). Real hosting/deployment so the app works independent of Aditya's laptop being on is a separate, larger, unscoped initiative.
+
+**Live pipeline state after this pass:** 16 companies scanning (was 15, +ThreatLocker), 159 relevant postings.
 
