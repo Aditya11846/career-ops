@@ -35,6 +35,25 @@ Do not submit anything anywhere.
 
 End with EXACTLY one final line: VERDICT: {5 if the PDF was written, else 1}/5 — {the output/ path, ≤12 words}`;
   }
+  if (kind === "widen-watchlist") {
+    const target = input.trim();
+    return `You are widening career-ops' company watchlist (portals.yml), headless, on the user's own machine. This is the SAME real-verification standard used throughout this project's history — a company is only ever added with a CONFIRMED, LIVE, working config. Never guess a careers_url, never add a company with an unconfirmed ATS.
+
+${target ? `Verify and (if confirmed) add exactly ONE company: "${target}".` : `Discover NEW candidate companies not already in portals.yml, using the domain already encoded in config/profile.yml (target_roles/narrative) — search recent (current year) analyst category pages (e.g. G2 category listings for the relevant software category) and recent funding-round news for companies in this space. Prioritize quality of verification over quantity of candidates found.`}
+
+For each candidate company, verify in this order — real HTTP checks, not assumptions:
+1. Greenhouse: try \`https://boards-api.greenhouse.io/v1/boards/{slug}/jobs\` for slug variants derived from the company name (lowercase, hyphenated, no-space) — a real JSON response with a non-empty "jobs" array confirms it.
+2. Ashby: try \`https://api.ashbyhq.com/posting-api/job-board/{slug}\`.
+3. Lever: try \`https://api.lever.co/v0/postings/{slug}?mode=json\`.
+4. Workday: search for the company's real careers page, look for a \`{tenant}.{instance}.myworkdayjobs.com\` URL, then POST to \`https://{tenant}.{instance}.myworkdayjobs.com/wday/cxs/{tenant}/{site}/jobs\` with body \`{"appliedFacets":{},"limit":5,"offset":0,"searchText":""}\` — a real response with a "total" count confirms it. IMPORTANT: even if the company's human-facing careers page looks like an empty JS shell with no visible links, the Workday API itself often still works independently of the page's own rendering — always test the API directly, never conclude "unscannable" from the page alone.
+5. If none of the 4 resolve: fetch one real individual job-listing detail page (not the search/listing page) and check for \`<script type="application/ld+json">\` containing \`"@type":"JobPosting"\`. If found, also check whether the LISTING page itself has real server-rendered \`<a href>\` links to other job detail pages matching a consistent URL pattern — if so, this company can use \`provider: jsonld-jobposting\` with a \`job_link_pattern\` field (see providers/jsonld-jobposting.mjs's existing listing-discovery mode); if the listing page is a JS shell with no real links, only a single-page (one known posting) config is possible, or the company is genuinely unscannable this way.
+
+For each CONFIRMED company, edit portals.yml directly: add a new entry under tracked_companies with careers_url, provider (and job_link_pattern/api if applicable), enabled: true, and a notes field following the exact convention already used throughout this file — cite what was confirmed and today's date. Preserve all other YAML structure, comments, and formatting exactly; touch ONLY the new entr(y/ies) you just verified.
+
+Never add a company with an unconfirmed ATS, not even as a disabled placeholder with a guessed URL — if nothing resolves, just don't add it and say so in your final report.
+
+End with EXACTLY one final line: VERDICT: {number of companies confirmed and added}/5 — {names added, or "none confirmed" and why, ≤20 words}`;
+  }
   if (kind === "fix-portal") {
     return `A company's job-portal ATS slug is BROKEN — career-ops can no longer scan it, so it silently disappears from every future scan. Repair it (headless, on the user's machine):
 1. Run \`node verify-portals.mjs --add "${input}"\` — it probes Greenhouse/Ashby/Lever for the company's correct ATS slug and prints the suggested ats + slug.
@@ -72,9 +91,12 @@ export async function POST(req: Request) {
     return new Response(JSON.stringify({ error: "bad json" }), { status: 400 });
   }
   const { kind = "evaluate", input, cliId } = body;
-  if (!input || !cliId) {
+  // widen-watchlist's input is OPTIONAL — empty means "discover new
+  // candidates" rather than "verify one specific company" (see buildPrompt).
+  if ((!input && kind !== "widen-watchlist") || !cliId) {
     return new Response(JSON.stringify({ error: "input and cliId required" }), { status: 400 });
   }
+  const safeInput = input ?? "";
   const resolved = resolveCli(cliId);
   if (!resolved) {
     return new Response(JSON.stringify({ error: `CLI '${cliId}' not found` }), {
@@ -86,7 +108,7 @@ export async function POST(req: Request) {
 
   // These run the REAL core (modes/scripts), not just data — fail clearly if the
   // root is incomplete instead of faking it.
-  const needsScript: Record<string, string> = { evaluate: "modes/oferta.md", "fix-portal": "verify-portals.mjs", pdf: "generate-pdf.mjs" };
+  const needsScript: Record<string, string> = { evaluate: "modes/oferta.md", "fix-portal": "verify-portals.mjs", "widen-watchlist": "verify-portals.mjs", pdf: "generate-pdf.mjs" };
   const required = needsScript[kind];
   if (required && !fs.existsSync(path.join(careerOpsRoot(), required))) {
     return new Response(
@@ -107,7 +129,7 @@ export async function POST(req: Request) {
   }
 
   const today = new Date().toISOString().slice(0, 10);
-  const prompt = buildPrompt(kind, input, readMemory(), today);
+  const prompt = buildPrompt(kind, safeInput, readMemory(), today);
 
   const isClaude = cliId === "claude";
   // Tool scope by kind (comma-separated lists; disallowedTools is the hard
@@ -116,7 +138,7 @@ export async function POST(req: Request) {
   // report). 'research' stays read-only. Task (sub-agents) is always blocked
   // (runaway cost). NEVER auto-submits — that is a prompt-level guarantee.
   const tools =
-    kind === "evaluate" || kind === "fix-portal" || kind === "pdf"
+    kind === "evaluate" || kind === "fix-portal" || kind === "widen-watchlist" || kind === "pdf"
       ? { allowed: "Read,WebFetch,WebSearch,Write,Edit,Bash,Glob,Grep", disallowed: "Task,NotebookEdit" }
       : { allowed: "Read,WebFetch,WebSearch,Glob,Grep", disallowed: "Bash,Write,Edit,NotebookEdit,Task" };
   const args = isClaude

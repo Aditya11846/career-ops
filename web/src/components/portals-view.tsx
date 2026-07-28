@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { Loader2, Radar, Wrench } from "lucide-react";
+import { Loader2, Radar, Wrench, Search } from "lucide-react";
 import { CompanyLogo } from "@/components/company-logo";
 import { useJobs, type Job } from "@/components/jobs/job-store";
 import { cn } from "@/lib/cn";
@@ -34,6 +34,13 @@ export function PortalsView() {
     return m;
   }, [jobs]);
 
+  // latest "widen-watchlist" discovery run (input is always empty for the
+  // discovery mode, so there's only ever one relevant job to track).
+  const widenJob = useMemo(() => {
+    const runs = jobs.filter((j) => j.kind === "widen-watchlist").sort((a, b) => b.startedAt - a.startedAt);
+    return runs[0];
+  }, [jobs]);
+
   function check() {
     setLoading(true);
     fetch("/api/portals/verify")
@@ -59,6 +66,7 @@ export function PortalsView() {
           {loading ? <Loader2 className="size-4 animate-spin" /> : <Radar className="size-4" />}
           Check portal health
         </button>
+        <WidenWatchlistButton job={widenJob} onStart={() => startJob({ title: "Widen watchlist", subtitle: "discover + verify new companies", kind: "widen-watchlist", input: "", page: "/portals" })} />
         {loading && <span className="text-xs text-faint">Probing each company&apos;s ATS… (~30–60s)</span>}
       </div>
 
@@ -113,6 +121,38 @@ export function PortalsView() {
         </div>
       )}
     </div>
+  );
+}
+
+function WidenWatchlistButton({ job, onStart }: { job?: Job; onStart: () => void }) {
+  if (job?.status === "running")
+    return (
+      <Link href={`/jobs/${job.id}`} className="inline-flex items-center gap-2 rounded-full border border-border px-4 py-2 text-sm font-medium text-brand max-sm:min-h-[44px]">
+        <Loader2 className="size-4 animate-spin" /> Researching…
+      </Link>
+    );
+  if (job?.status === "done")
+    return (
+      <div className="flex items-center gap-2">
+        <button
+          onClick={onStart}
+          className="inline-flex items-center gap-2 rounded-full border border-border px-4 py-2 text-sm font-medium text-muted transition-colors hover:border-brand/40 hover:text-brand max-sm:min-h-[44px]"
+        >
+          <Search className="size-4" /> Widen watchlist
+        </button>
+        <Link href={`/jobs/${job.id}`} className="text-xs font-medium text-emerald-600 dark:text-emerald-400">
+          {job.result?.summary ?? "last run"}
+        </Link>
+      </div>
+    );
+  return (
+    <button
+      onClick={onStart}
+      title="Have the agent discover and verify new companies to add to the watchlist (real ATS checks, never a guessed URL)"
+      className="inline-flex items-center gap-2 rounded-full border border-border px-4 py-2 text-sm font-medium text-muted transition-colors hover:border-brand/40 hover:text-brand max-sm:min-h-[44px]"
+    >
+      <Search className="size-4" /> Widen watchlist
+    </button>
   );
 }
 

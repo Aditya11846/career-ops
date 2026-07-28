@@ -195,6 +195,12 @@ tracked_companies:
     enabled: true
     notes: "Zero Trust Network Access startup. Confirmed Lever during 2026-07-28 research."
 
+  - name: ThreatLocker
+    careers_url: "https://job-boards.greenhouse.io/threatlocker"
+    provider: greenhouse
+    enabled: true
+    notes: "Zero Trust / endpoint allowlisting security vendor. Confirmed Greenhouse (live API, 33 real postings) during 2026-07-28 watchlist-widening research."
+
 # job_boards: intentionally empty for now — this search is company-watchlist-
 # driven (curated, narrow domain), not board-driven (see brainstorm notes,
 # "curated watchlist vs. open scanning" discussion).
