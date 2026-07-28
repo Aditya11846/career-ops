@@ -6,12 +6,16 @@
 // markdown table, NOT a scheduled job or a new database).
 //
 // Data file: data/relationships.md (user layer, gitignored — real names).
-// Table: | # | Name | Role | Company | LastContact | NextAction | Status | Notes |
+// Table: | # | Name | Role | Company | Contact | LastContact | NextAction | Status | Notes |
+// Contact = a LinkedIn profile URL, email, or other reach-out channel — how
+// to ACTUALLY message this person, not just their name (#... real gap caught
+// live: the first contacto build found real people but never captured how
+// to reach them, only a name).
 //
 // CLI:
 //   node relationships.mjs --json                        list, with computed overdue/daysSince
 //   node relationships.mjs --summary                     human-readable table
-//   node relationships.mjs --add --name N --role R --company C [--next-action YYYY-MM-DD] [--notes "..."]
+//   node relationships.mjs --add --name N --role R --company C [--contact URL_OR_EMAIL] [--next-action YYYY-MM-DD] [--notes "..."]
 //   node relationships.mjs --touch <#> [--next-action YYYY-MM-DD]   mark contacted today
 
 import { readFileSync, existsSync } from 'fs';
@@ -22,8 +26,8 @@ import { readCompanySignal } from './signal-agent/compute-heat.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
 const FILE = join(CAREER_OPS, 'data/relationships.md');
-const HEADER = '| # | Name | Role | Company | LastContact | NextAction | Status | Notes |';
-const SEP = '|---|------|------|---------|-------------|------------|--------|-------|';
+const HEADER = '| # | Name | Role | Company | Contact | LastContact | NextAction | Status | Notes |';
+const SEP = '|---|------|------|---------|---------|-------------|------------|--------|-------|';
 
 function today() {
   return new Date().toISOString().split('T')[0];
@@ -39,6 +43,15 @@ function daysBetween(d1, d2) {
 }
 
 // --- Parse / serialize data/relationships.md ---
+// BACKWARD-COMPAT WARNING, learned the hard way (real data loss, 2026-07-28):
+// this file's schema grew a Contact column after rows already existed on
+// disk in the OLD (7-cell) shape. A parser that hard-requires the NEW
+// minimum cell count silently drops every old row -- and since --add/--touch
+// always serialize(load()) the FULL row set back to disk, that silent drop
+// becomes a silent DELETE the next time anyone writes. Never repeat that:
+// any future column addition here MUST accept the old cell count too,
+// distinguishing old (7-cell, no Contact) from new (8-cell, Contact present)
+// by count rather than assuming today's shape is the only shape on disk.
 export function parseRelationships(content) {
   if (!content) return [];
   const rows = [];
@@ -46,14 +59,26 @@ export function parseRelationships(content) {
     const m = line.match(/^\|\s*(\d+)\s*\|(.*)\|\s*$/);
     if (!m) continue;
     const cells = m[2].split('|').map((c) => c.trim());
-    if (cells.length < 7) continue;
-    const [name, role, company, lastContact, nextAction, status, ...noteParts] = cells;
-    if (name === 'Name') continue; // header row guard
+    if (cells.length < 7) continue; // truly malformed, not just old-schema
+    if (cells[0] === 'Name') continue; // header row guard
+    // Old schema (pre-Contact column, before 2026-07-28) always produces
+    // exactly 7 cells for a row with pipe-free notes; new schema always
+    // produces 8+ (Contact is a required position even when empty). This is
+    // the one reliable signal -- cells.length alone -- since old and new
+    // both use the same 7 vs 8 fixed-field count regardless of note content.
+    let name, role, company, contact, lastContact, nextAction, status, noteParts;
+    if (cells.length === 7) {
+      [name, role, company, lastContact, nextAction, status, ...noteParts] = cells;
+      contact = '';
+    } else {
+      [name, role, company, contact, lastContact, nextAction, status, ...noteParts] = cells;
+    }
     rows.push({
       n: m[1],
       name,
       role,
       company,
+      contact: contact || '',
       lastContact: lastContact || '',
       nextAction: nextAction || '',
       status: status || 'Active',
@@ -66,7 +91,7 @@ export function parseRelationships(content) {
 function serialize(rows) {
   const lines = [HEADER, SEP];
   for (const r of rows) {
-    lines.push(`| ${r.n} | ${r.name} | ${r.role} | ${r.company} | ${r.lastContact} | ${r.nextAction} | ${r.status} | ${r.notes} |`);
+    lines.push(`| ${r.n} | ${r.name} | ${r.role} | ${r.company} | ${r.contact || ''} | ${r.lastContact} | ${r.nextAction} | ${r.status} | ${r.notes} |`);
   }
   return lines.join('\n') + '\n';
 }
@@ -108,15 +133,16 @@ function main() {
     const name = parseArg(args, '--name');
     const role = parseArg(args, '--role') || '';
     const company = parseArg(args, '--company') || '';
+    const contact = parseArg(args, '--contact') || '';
     const nextAction = parseArg(args, '--next-action') || '';
     const notes = parseArg(args, '--notes') || '';
     if (!name) {
-      console.error('Usage: node relationships.mjs --add --name "Name" [--role R] [--company C] [--next-action YYYY-MM-DD] [--notes "..."]');
+      console.error('Usage: node relationships.mjs --add --name "Name" [--role R] [--company C] [--contact URL_OR_EMAIL] [--next-action YYYY-MM-DD] [--notes "..."]');
       process.exit(1);
     }
     const rows = load();
     const n = nextNum(rows);
-    rows.push({ n: String(n), name, role, company, lastContact: today(), nextAction, status: 'Active', notes });
+    rows.push({ n: String(n), name, role, company, contact, lastContact: today(), nextAction, status: 'Active', notes });
     writeFileAtomic(FILE, serialize(rows));
     console.log(JSON.stringify({ added: n }, null, 2));
     return;
@@ -149,7 +175,8 @@ function main() {
     for (const r of enriched) {
       const flag = r.overdue ? ' [OVERDUE]' : '';
       const heat = r.companyHeat !== null ? ` heat=${r.companyHeat}` : '';
-      console.log(`#${r.n} ${r.name} (${r.role} @ ${r.company})${heat} — last contact ${r.lastContact || 'never'}, next ${r.nextAction || '—'}${flag}`);
+      const contact = r.contact ? ` [${r.contact}]` : ' [NO CONTACT INFO]';
+      console.log(`#${r.n} ${r.name} (${r.role} @ ${r.company})${heat}${contact} — last contact ${r.lastContact || 'never'}, next ${r.nextAction || '—'}${flag}`);
     }
     return;
   }
@@ -170,14 +197,27 @@ function assertEqual(actual, expected, label) {
 }
 
 function runSelfTest() {
-  const sample = [HEADER, SEP, '| 1 | Jane Doe | Recruiter | Acme | 2026-07-01 | 2026-07-10 | Active | met at a conference |'].join('\n');
+  const sample = [HEADER, SEP, '| 1 | Jane Doe | Recruiter | Acme | linkedin.com/in/janedoe | 2026-07-01 | 2026-07-10 | Active | met at a conference |'].join('\n');
   const rows = parseRelationships(sample);
   assertEqual(rows.length, 1, 'parses one data row, skips header/separator');
   assertEqual(rows[0].name, 'Jane Doe', 'parses name');
+  assertEqual(rows[0].contact, 'linkedin.com/in/janedoe', 'parses contact (LinkedIn/email column)');
   assertEqual(rows[0].notes, 'met at a conference', 'parses notes (last column)');
 
   const roundTrip = parseRelationships(serialize(rows));
   assertEqual(roundTrip, rows, 'serialize -> parse round-trips losslessly');
+
+  // Regression test for real data loss (2026-07-28): an OLD-schema row
+  // (7 cells, no Contact column) must still parse -- NOT be silently
+  // dropped, which previously caused --add to overwrite the file with only
+  // the new row, destroying every pre-existing real contact.
+  const oldFormatLine = '| 9 | Old Row | Peer | Acme | 2026-07-01 | 2026-07-10 | Active | pre-Contact-column entry |';
+  const oldRows = parseRelationships([HEADER, SEP, oldFormatLine].join('\n'));
+  assertEqual(oldRows.length, 1, 'OLD 7-cell rows (pre-Contact column) still parse, not silently dropped');
+  assertEqual(oldRows[0].name, 'Old Row', 'OLD-format row name parses correctly');
+  assertEqual(oldRows[0].contact, '', 'OLD-format row has no contact, defaults to empty string not undefined');
+  assertEqual(oldRows[0].lastContact, '2026-07-01', 'OLD-format row lastContact lands in the right field, not shifted by the missing Contact column');
+  assertEqual(oldRows[0].notes, 'pre-Contact-column entry', 'OLD-format row notes still parse correctly');
 
   const enriched = enrich([{ n: '1', name: 'X', role: '', company: '', lastContact: '2026-07-01', nextAction: '2026-07-01', status: 'Active', notes: '' }]);
   // nextAction in the past relative to "today" in this sandboxed test env

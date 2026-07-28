@@ -75,9 +75,10 @@ End with EXACTLY one final line: VERDICT: {number of companies scored}/5 — {co
 
 1. Read modes/contacto.md and follow the "LinkedIn power move" flow EXACTLY (not the Greeting variant — this always has a specific application). Ground it in THIS person: read cv.md, config/profile.yml (including contact_preferences), and the evaluation report at reports/${input}-*.md for the company/role/JD context.
 2. Use WebSearch to identify real candidate contacts: hiring manager, assigned recruiter, 2-3 team peers, interviewer (if scheduled). Never fabricate a name — if you can't find a real person for a slot, skip that slot and say so.
-3. For each REAL person found, classify contact type and draft the message per modes/contacto.md's persona engine (≤300 chars, no corporate-speak, never share a phone number).
-4. For each REAL person found, add them to the relationship tracker by running: \`node relationships.mjs --add --name "{Full Name}" --role "{their role/title}" --company "{Company}" --notes "{contact type}: {the drafted message, verbatim}"\` — this is the ONLY way to persist a contact; never edit data/relationships.md directly.
-5. NEVER send, submit, or click anything. This is research + draft-only — the user copies and sends manually themselves.
+3. For EACH real person found, also capture their actual LinkedIn profile URL (the real https://www.linkedin.com/in/... URL from the search result, not a guessed slug) — this is REQUIRED, not optional. A name with no way to actually reach them is useless to the user. If you can find the person by name/role/company but genuinely cannot find their profile URL, still add them but say so explicitly in your final report (do not silently omit the gap).
+4. For each REAL person found, classify contact type and draft the message per modes/contacto.md's persona engine (≤300 chars, no corporate-speak, never share a phone number).
+5. For each REAL person found, add them to the relationship tracker by running: \`node relationships.mjs --add --name "{Full Name}" --role "{their role/title}" --company "{Company}" --contact "{their real LinkedIn URL, or leave empty if genuinely not found}" --notes "{contact type}: {the drafted message, verbatim}"\` — this is the ONLY way to persist a contact; never edit data/relationships.md directly.
+6. NEVER send, submit, or click anything. This is research + draft-only — the user copies and sends manually themselves.
 
 End with EXACTLY one final line: VERDICT: {number of real contacts found and added}/5 — {names + contact types, ≤20 words}
 

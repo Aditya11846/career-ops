@@ -28,7 +28,7 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
-  let body: { action?: "add" | "touch"; name?: string; role?: string; company?: string; nextAction?: string; notes?: string; n?: string };
+  let body: { action?: "add" | "touch"; name?: string; role?: string; company?: string; contact?: string; nextAction?: string; notes?: string; n?: string };
   try {
     body = await req.json();
   } catch {
@@ -38,6 +38,7 @@ export async function POST(req: Request) {
   if (body.action === "add") {
     if (!body.name?.trim()) return new Response(JSON.stringify({ error: "name required" }), { status: 400 });
     const args = ["--add", "--name", body.name, "--role", body.role || "", "--company", body.company || ""];
+    if (body.contact) args.push("--contact", body.contact);
     if (body.nextAction) args.push("--next-action", body.nextAction);
     if (body.notes) args.push("--notes", body.notes);
     const stdout = await run(args);

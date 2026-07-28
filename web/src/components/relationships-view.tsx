@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Loader2, Radar, Plus, Flame, ChevronDown, Copy, Check } from "lucide-react";
+import { Loader2, Radar, Plus, Flame, ChevronDown, Copy, Check, ExternalLink, AlertTriangle } from "lucide-react";
 import { useJobs, type Job } from "@/components/jobs/job-store";
 import { cn } from "@/lib/cn";
 
@@ -11,6 +11,7 @@ type Relationship = {
   name: string;
   role: string;
   company: string;
+  contact: string;
   lastContact: string;
   nextAction: string;
   status: string;
@@ -120,6 +121,20 @@ function ContactRow({ r, onDone }: { r: Relationship; onDone: () => void }) {
             <Flame className="size-3" /> {r.companyHeat}
           </span>
         )}
+        {r.contact ? (
+          <a
+            href={r.contact.startsWith("http") ? r.contact : `mailto:${r.contact}`}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-semibold bg-sky-500/15 text-sky-700 hover:bg-sky-500/25 dark:text-sky-400"
+          >
+            <ExternalLink className="size-3" /> Contact
+          </a>
+        ) : (
+          <span title="No LinkedIn/email captured for this person yet" className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-semibold bg-amber-500/15 text-amber-700 dark:text-amber-400">
+            <AlertTriangle className="size-3" /> no contact info
+          </span>
+        )}
         <span className="ml-auto text-xs text-muted">
           last contact {r.lastContact || "never"}
           {r.nextAction && <> · next {r.nextAction}</>}
@@ -168,6 +183,7 @@ function AddContactForm({ onDone }: { onDone: () => void }) {
   const [name, setName] = useState("");
   const [role, setRole] = useState("");
   const [company, setCompany] = useState("");
+  const [contact, setContact] = useState("");
   const [nextAction, setNextAction] = useState("");
   const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
@@ -179,7 +195,7 @@ function AddContactForm({ onDone }: { onDone: () => void }) {
     await fetch("/api/relationships", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "add", name, role, company, nextAction, notes }),
+      body: JSON.stringify({ action: "add", name, role, company, contact, nextAction, notes }),
     });
     setSaving(false);
     onDone();
@@ -190,6 +206,7 @@ function AddContactForm({ onDone }: { onDone: () => void }) {
       <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Name (required)" required className="rounded-md border border-border bg-surface/60 px-3 py-2 text-sm outline-none focus:border-brand/50" />
       <input value={role} onChange={(e) => setRole(e.target.value)} placeholder="Role (Recruiter, Hiring Manager…)" className="rounded-md border border-border bg-surface/60 px-3 py-2 text-sm outline-none focus:border-brand/50" />
       <input value={company} onChange={(e) => setCompany(e.target.value)} placeholder="Company" className="rounded-md border border-border bg-surface/60 px-3 py-2 text-sm outline-none focus:border-brand/50" />
+      <input value={contact} onChange={(e) => setContact(e.target.value)} placeholder="LinkedIn URL or email" className="rounded-md border border-border bg-surface/60 px-3 py-2 text-sm outline-none focus:border-brand/50" />
       <input type="date" value={nextAction} onChange={(e) => setNextAction(e.target.value)} placeholder="Next follow-up date" className="rounded-md border border-border bg-surface/60 px-3 py-2 text-sm outline-none focus:border-brand/50" />
       <input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Notes (how you connected, context…)" className="col-span-2 rounded-md border border-border bg-surface/60 px-3 py-2 text-sm outline-none focus:border-brand/50 max-sm:col-span-1" />
       <button type="submit" disabled={saving || !name.trim()} className="col-span-2 rounded-md bg-brand px-3 py-2 text-sm font-medium text-brand-foreground disabled:opacity-50 max-sm:col-span-1">
