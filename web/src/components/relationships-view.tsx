@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Loader2, Radar, Plus, Flame } from "lucide-react";
+import { Loader2, Radar, Plus, Flame, ChevronDown, Copy, Check } from "lucide-react";
 import { useJobs, type Job } from "@/components/jobs/job-store";
 import { cn } from "@/lib/cn";
 
@@ -94,29 +94,73 @@ export function RelationshipsView() {
       {!loading && sorted.length > 0 && (
         <ul className="mt-5 divide-y divide-border overflow-hidden rounded-2xl border border-border bg-surface/40">
           {sorted.map((r) => (
-            <li key={r.n} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-3">
-              <span className="text-sm font-medium">{r.name}</span>
-              <span className="text-xs text-faint">
-                {r.role}
-                {r.role && r.company ? " @ " : ""}
-                {r.company}
-              </span>
-              {r.companyHeat !== null && (
-                <span className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-semibold bg-orange-500/15 text-orange-700 dark:text-orange-400">
-                  <Flame className="size-3" /> {r.companyHeat}
-                </span>
-              )}
-              <span className="ml-auto text-xs text-muted">
-                last contact {r.lastContact || "never"}
-                {r.nextAction && <> · next {r.nextAction}</>}
-              </span>
-              {r.overdue && <span className="rounded px-1.5 py-0.5 text-[10px] font-semibold bg-red-500/15 text-red-700 dark:text-red-400">overdue</span>}
-              <TouchButton n={r.n} onDone={reload} />
-            </li>
+            <ContactRow key={r.n} r={r} onDone={reload} />
           ))}
         </ul>
       )}
     </div>
+  );
+}
+
+function ContactRow({ r, onDone }: { r: Relationship; onDone: () => void }) {
+  const [expanded, setExpanded] = useState(false);
+  const hasNotes = r.notes.trim().length > 0;
+
+  return (
+    <li className="px-4 py-3">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <span className="text-sm font-medium">{r.name}</span>
+        <span className="text-xs text-faint">
+          {r.role}
+          {r.role && r.company ? " @ " : ""}
+          {r.company}
+        </span>
+        {r.companyHeat !== null && (
+          <span className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-semibold bg-orange-500/15 text-orange-700 dark:text-orange-400">
+            <Flame className="size-3" /> {r.companyHeat}
+          </span>
+        )}
+        <span className="ml-auto text-xs text-muted">
+          last contact {r.lastContact || "never"}
+          {r.nextAction && <> · next {r.nextAction}</>}
+        </span>
+        {r.overdue && <span className="rounded px-1.5 py-0.5 text-[10px] font-semibold bg-red-500/15 text-red-700 dark:text-red-400">overdue</span>}
+        {hasNotes && (
+          <button
+            onClick={() => setExpanded((e) => !e)}
+            className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs text-muted transition-colors hover:border-brand/40 hover:text-brand"
+          >
+            <ChevronDown className={cn("size-3 transition-transform", expanded && "rotate-180")} /> {expanded ? "Hide" : "View draft"}
+          </button>
+        )}
+        <TouchButton n={r.n} onDone={onDone} />
+      </div>
+      {expanded && hasNotes && (
+        <div className="mt-2 rounded-lg border border-border bg-surface/60 p-3">
+          <div className="flex items-start justify-between gap-2">
+            <p className="whitespace-pre-wrap text-xs leading-relaxed text-muted">{r.notes}</p>
+            <CopyButton text={r.notes} />
+          </div>
+        </div>
+      )}
+    </li>
+  );
+}
+
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      onClick={() => {
+        navigator.clipboard.writeText(text);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
+      }}
+      title="Copy to clipboard"
+      className="inline-flex shrink-0 items-center gap-1 rounded-md border border-border px-2 py-1 text-xs text-muted transition-colors hover:border-brand/40 hover:text-brand"
+    >
+      {copied ? <Check className="size-3 text-emerald-500" /> : <Copy className="size-3" />} {copied ? "Copied" : "Copy"}
+    </button>
   );
 }
 
