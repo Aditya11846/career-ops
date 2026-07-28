@@ -1,0 +1,251 @@
+# Brainstorm session — 2026-07-26
+
+Running notes from a live redesign brainstorm. Goal: think broad on each section of career-ops, then narrow down. Not a plan doc, not commitments — just a working record so nothing said gets lost mid-session.
+
+---
+
+## 1. Job Discovery
+
+### How it works today (confirmed, mechanical)
+- Two access points, same underlying capability:
+  - `scan.mjs` + `portals.yml` — zero-LLM, deterministic. Loops a hand-maintained `tracked_companies` list in `portals.yml` (each entry: company, ATS type, slug), hits that ATS's public JSON API, applies a title allow/blocklist.
+  - Web `/explore` page (`lib/explore.ts` + `scan.ts`) — thin wrapper over `scan-ats-full.mjs --dry-run`. Same 4-ATS ceiling underneath, just a different access pattern.
+- **It's real API calls, not scraping.** Greenhouse/Ashby/Lever/Workday all expose a public, unauthenticated JSON API that a company's own careers page fetches client-side to render itself — `scan.mjs` calls that exact same endpoint. That's why it's fast, free, no login, doesn't break on HTML/CSS changes.
+- **Model is pull, not push**: only ever looks at companies explicitly listed in `portals.yml`. Cannot discover an unknown company. Cannot see any company not on one of the 4 supported ATS platforms — LinkedIn, Naukri, Indeed, custom career pages, aggregators are all structurally invisible, not just unconfigured.
+- Ceiling, precisely: **known-company list × 4 supported ATS dialects.**
+
+### Known bug (separate from the ceiling above, cheap to fix, not yet done)
+- `portals.yml`'s title filter excludes "Intern" (Aditya's real, honest current level) while doing nothing to exclude senior-only signal words like "Founding" — direct cause of the Glean (Founding FDE, 4+ yrs required) mismatch. Agreed: remove the Intern exclusion. Not yet applied.
+
+### Cheap widening options found (config-only, no new adapter code)
+- Merge in `career-ops-india`'s `portals/india.yml` (more companies, same 4 ATS types).
+- Add Paytm + Fampay directly — both already run on `jobs.lever.co`.
+
+### Vision discussion — breadth (2026-07-26)
+
+**Q: why is direct-ATS-API scanning "better" than an account on Greenhouse/Ashby/Lever?**
+Not really a fair comparison — these aren't marketplaces, they're B2B hiring software each company licenses separately. No cross-company search exists on their end to sign up for. Our method gets real-time structured data for companies we've listed, no login/rate-limit/HTML-breakage risk. Tradeoff is narrowness (known companies only), not an alternative to some broader "account" option that doesn't exist.
+
+**Q: why shouldn't more job boards be added?**
+Nothing stops it — but each candidate board sits at a different risk tier, not a free win like adding another Greenhouse company:
+- LinkedIn — ToS explicitly forbids scraping, has litigated against scrapers (hiQ v. LinkedIn). High legal risk, no public jobs API for individuals.
+- Indeed — public jobs API discontinued years ago. Scraping-only, fragile.
+- Naukri/Foundit/Instahyre — no real public API (confirmed earlier research pass), scraping/login-wall only.
+- Bespoke company career pages (non-ATS) — one-off scraper per company, not reusable.
+
+**Q: does scraping more sources hurt or help evaluation quality?**
+Both, depending on execution. More sources = better recall (more raw shots at a good match). But raw scraped listings tend to be messier (incomplete requirements, stale/duplicate postings, inconsistent formatting) — feeding that straight into `oferta.md` risks worse scoring, since a badly-parsed JD gives the evaluator less to ground itself in (works against the "never fabricate" design). Fix: normalize any new source into the SAME clean shape the ATS path already produces (title, company, full JD text, requirements) before it hits evaluation. Done that way, more sources is a real net positive, not a quality risk.
+
+**Q: can this genuinely be built into the existing web app/codebase?**
+Yes — `lib/explore.ts` is architecturally the intended seam for discovery beyond the hand-maintained company list; extending it with new source adapters (scraper, headless-browser session via the already-installed Playwright MCP, or a paid-API integration where one exists) fits the existing pattern rather than bolting something foreign on. The assistant already does ad-hoc internet fetches for its "research" action, so pulling from arbitrary web sources isn't new territory for this codebase.
+
+### Open — still narrowing down
+- Next: which specific new sources/boards to prioritize, and what the normalization contract should look like concretely. Aditya's ideas pending.
+
+---
+
+## 2. Job Sources — deep research (senior/veteran search strategy + broader source landscape)
+
+Context for this section: this isn't just for Aditya — he's building/extending career-ops for his father too (22 years professional experience, unemployed 1.5 years). That's a materially different search problem than early/mid-career job hunting, so it's treated separately below.
+
+### A. How does a 22-year veteran with an 18-month gap actually find a job?
+
+**The hidden job market is real, not an urban legend — but the exact number is soft.** Multiple independent 2025-2026 sources converge on the same order of magnitude: a cited 2025 LinkedIn workforce report puts 85% of jobs filled through networking; referral-based hiring converts at ~43% vs. ~6% average across job boards; 54% of a 2025 US worker survey said they were hired through a personal connection. The specific percentage varies 60-85% depending on source and most of the citing sites are career-content/resume-service blogs rather than primary research — so treat the exact figure as soft, but the directional claim ("most senior roles are filled off-market, before or without ever being publicly posted") as well-supported across independent sources, not folklore.
+
+**ATS bias against senior/overqualified candidates is real and documented, not paranoia.** Over 90% of employers filter by ATS criteria (skills/credentials/years) before human review; systems can specifically flag a candidate as "overqualified" when seniority exceeds the posting's level, screening them out pre-human-review. Practical countermeasure found in current guidance: trim to ~2 pages, lead bullets with outcomes not duties, avoid over-signaling total tenure where it triggers overqualification filters.
+
+**Executive search — real mechanics, and an important nuance for an unemployed candidate:** Retained search firms (30-33% fee, paid BY THE EMPLOYER, 60-90 day timelines) are typically hired by companies to proactively headhunt *already-employed, passive* candidates — they're structurally harder for an actively-job-hunting unemployed person to "engage" in the way you'd engage a service, since the firm's client is the employer, not the candidate. Contingency firms/staffing agencies (20-30% fee, faster, ALSO employer-paid) are the more realistic engagement path for someone actively applying. **Important flag: legitimate recruiters and search firms never charge the candidate a fee** — this matters specifically because a vulnerable long-term-unemployed senior candidate is exactly the profile predatory "pay us to place you" resume-mill services target. Worth stating this explicitly to Aditya's father as a filter.
+
+**Outplacement services** are real and effective (executive programs recommend 9-12 months of support, cite landing in half the average time) — but the standard delivery model is an **employer-paid severance benefit given at the time of departure**, not something typically purchased fresh 18 months into unemployment. If his father's employer didn't provide it at exit, direct-to-consumer executive coaching is a separate (paid-by-candidate) category worth being cautious about, not the same thing as outplacement proper.
+
+**Informational interviews are a real, structured tactic**, not just "network more": brief, specific outreach (why this person specifically, what you want to learn — never an attached resume or an immediate job ask), explicit information-not-job framing during the conversation, and a follow-up thank-you. This is the concrete mechanic behind accessing the hidden job market described above.
+
+**Executive-specific job boards**: general boards (LinkedIn/Indeed/Glassdoor) all have senior-role filters; FT.com's exec-appointments.com is a real dedicated senior-executive board. Search did not turn up a clearly-dominant India-specific senior-executive-only board (IIM Jobs exists and skews MBA/mid-senior, but wasn't strongly confirmed as senior-specific in this pass) — this needs a direct follow-up look, not confirmed either way.
+
+### B/C. Source landscape + automation risk, combined (risk classification per source)
+
+**Tier 1 — legitimate public API, safe to automate:**
+- Greenhouse/Ashby/Lever/Workday (already have this).
+- Hacker News "Who's Hiring" — genuinely free: RSS (`hnrss.org/whoishiring/jobs`, keyword-filterable) or the free Algolia HN API (deterministic, no auth). Real, low-risk, zero cost. **Caveat: skews startup/tech hiring** — likely low value for a 22-year veteran unless his background is tech-adjacent; high value if it is.
+
+**Tier 2 — structured data harvesting, legally low-risk (public data meant for indexing), but not a single feed to query:**
+- **schema.org `JobPosting` markup** — most modern company career pages (regardless of underlying ATS/CMS) embed this JSON-LD specifically so Google for Jobs can index them. This is legitimate, public, meant-to-be-crawled data — a fundamentally different risk profile than scraping a platform's private interface. **Correction to my original hypothesis going in:** there is no single "query Google for Jobs" endpoint — Google deprecated their Jobs API for third-party querying, so this isn't a feed you subscribe to. The real mechanic is: visit an individual company's own career page directly and parse its embedded JobPosting JSON-LD. **The value isn't "one feed," it's a universal parser** — write ONE JobPosting-schema reader, and it works on ANY company's career page that embeds it, regardless of whether that company is on Greenhouse/Ashby/Lever/Workday or something else entirely. This is a genuine way to broaden company coverage beyond the current 4-ATS ceiling without building N platform-specific adapters — but it only works for companies that actually embed the markup (most do, for SEO, but not universal, and smaller/older sites may not).
+
+**Tier 3 — no longer a cheap/free win (correcting initial hypothesis):**
+- **Reddit** — as of May 2026, unauthenticated `.json` endpoints return HTTP 403; the free OAuth tier is non-commercial-only with a 2-4 week manual approval wait and 100 req/min cap; the real commercial tier costs $0.24/1,000 calls with a **$12,000/year minimum commitment**. Since career-ops here is personal/non-commercial use, the free tier's *terms* may technically apply, but it now requires manual approval (not the instant, frictionless source I assumed) — flag as usable-but-slower, not the free instant win originally hypothesized.
+
+**Tier 4 — scraping a platform's own interface against its ToS, real risk (not scaremongering, documented):**
+- **LinkedIn**: `hiQ Labs v. LinkedIn` is the case everyone cites as "scraping public data is legal" — true as far as it goes (Ninth Circuit found the CFAA, a *hacking* statute, doesn't cover collecting public data), but **the full story is a cautionary tale, not a green light**: the case ended in a **private settlement in Dec 2022** where hiQ agreed to **completely stop scraping, delete all its code/data/models, pay LinkedIn $500,000 in damages, and stipulate that LinkedIn COULD establish liability under the CFAA and its California equivalent.** The company that "won" the precedent lost the actual fight and was destroyed as a business. Since then: LinkedIn has continued unilateral enforcement independent of any lawsuit — in 2025 it removed the LinkedIn Company Pages of Apollo.io and Seamless.ai (established B2B sales-intelligence companies) as part of an active crackdown, and it routinely sends cease-and-desist letters citing breach-of-contract (ToS violation) rather than CFAA, which sidesteps the hiQ precedent entirely. **The CFAA ruling only protects against one specific legal theory; LinkedIn has others (contract law, DMCA/anti-circumvention) that remain fully available and actively used.**
+- **Apify** (the specific tool floated): confirmed it hosts many LinkedIn/Indeed scraper "Actors," but Apify's own legal docs are explicit — *"Apify does not decide whether a target or use case is lawful for your organization"* and users are *solely responsible* for ToS/robots.txt/legal compliance; the platform disclaims all liability for ToS violations, CFAA issues, or lawsuits arising from what you scrape. Using Apify doesn't transfer or reduce risk — it's a tool, not a legal shield.
+- **Indeed**: public Job Search API and Publisher/XML feed were **both fully retired in 2024**, no individual-accessible replacement. Current APIs (Job Sync, Sponsored Jobs) are partner-only, gated behind a "multi-month sales process" and, for Sponsored Jobs, **active paid ad spend** ($3/call, requires 3 consecutive months of sponsorship spend) — not viable for an individual job seeker's tool at all.
+- **Naukri/Foundit/Instahyre/Cutshort/Hirect**: confirmed earlier in this session — no real public API, scraping/login-wall only.
+
+**Tier 5 — requires login/account, highest risk:** any India platform requiring an authenticated session to view listings (same bucket as the existing unproven `apply-agent/tier2/naukri.mjs`).
+
+### D. Concrete proposals for career-ops
+
+1. **schema.org JobPosting universal parser** — write once, works across any company's career page regardless of ATS, genuinely widens coverage beyond the 4-platform ceiling without per-platform adapters. **Size: one adapter, roughly a session** (parser + integration into the `lib/explore.ts` seam + normalization into the same clean shape `oferta.md` already expects). This is the top recommendation — legitimate data, broadest genuine reach, fits the existing architecture.
+2. **HN "Who's Hiring" ingestion** via the free Algolia API/RSS — **size: a few hours**, genuinely free and risk-free, but scope it honestly as tech-skewed and likely low-value unless the target candidate (Aditya or his father) is in a tech-adjacent field.
+3. **A senior/veteran-specific evaluation mode** — given how much senior hiring is off-market, a mode that shifts philosophy from "does this JD match" toward: (a) flagging companies with visible active senior-hiring signals (leadership changes, funding events, org-chart gaps) as informational-interview targets rather than scored postings, (b) tracking a parallel "relationship pipeline" of people-to-contact alongside the existing scored-job pipeline, (c) explicit overqualification-safe CV formatting guidance. **Size: fundamentally new capability, multi-session** — new data model (contacts, not just jobs), new mode file, likely a new tracker table alongside `applications.md`. Not a quick add.
+4. **Do NOT build LinkedIn/Indeed scraping automation.** Not a moral judgment — a factual cost-benefit one: the personal LinkedIn account itself (his father's, or Aditya's) is the highest-value asset for the ONE channel proven to matter most for senior hires (informational interviews, referrals, direct outreach — see section A). LinkedIn has real, demonstrated enforcement (2025 company-page takedowns, active cease-and-desist practice) independent of the narrow CFAA question hiQ settled. Automating scraping on that same account risks the account itself — trading away the highest-yield channel to gain a marginal, replaceable data source (job listings, which are also visible via Tier 1/2 sources above with zero account risk). If any India platform's listings are truly needed, the schema.org route or manual/low-volume checking carries none of this risk.
+
+### Summary verdict
+Widening job discovery is worth doing, but the two genuinely low-risk, architecture-fitting wins are the schema.org universal parser and HN ingestion — both real, both buildable now. The senior/veteran angle is less about scraping more job boards and more about building a *different kind of pipeline* (relationships/signals, not just scored postings) — that's the bigger, more valuable, and more honest response to "22 years experience, 18 months unemployed" than trying to out-scrape LinkedIn's bot detection.
+
+---
+
+## 3. Dad's actual remote-role history — what it tells us (discussion, not action)
+
+Confirmed employer sequence, all remote: Akamai → Symantec (now Broadcom) → PrimaryIO (nPrimary.io) → Nuance (now Microsoft).
+
+**Quick facts checked (informational only, no action taken):**
+- Broadcom's careers run on Workday — one of the 4 ATS types career-ops already knows how to read.
+- Akamai runs on Oracle Cloud HCM/Fusion Recruiting — confirmed via Oracle's own docs that the job-requisition REST endpoints are internal-use-only, not a public feed like Greenhouse's. Different animal from the ATS-API model entirely.
+- Microsoft's careers system is likewise a large proprietary in-house platform, not one of the 4.
+- nPrimary.io = PrimaryIO, a small hybrid-cloud/disaster-recovery-as-a-service company — too small to read much into as an ATS data point.
+
+**The actual point of this, per Aditya's correction: this is about reading the shape of a career, not about which ATS each past employer happens to run.** The sequence draws a lane: CDN/edge infrastructure (Akamai) → enterprise cybersecurity (Symantec) → hybrid-cloud/DR (PrimaryIO) → speech/conversational AI (Nuance/Microsoft). All infrastructure-adjacent enterprise software, all remote-friendly (or at least were, for him), all large-scale platform companies rather than consumer-facing ones.
+
+**Resolved (2026-07-26):** title doesn't matter, geography doesn't matter (Germany/Europe/USA/anywhere), only comp matters heavily. The real ambition, per Aditya: not "widen India job discovery," but build the equivalent of a tireless human researcher whose sole job is finding senior-level roles for his dad, anywhere in the world, running 24/7. Hypothetical home for config + visibility: the career-ops website (existing `/explore` seam + dashboard), extended — not built yet, purely architectural at this stage.
+
+## 4. "Tireless researcher" architecture — four-layer breakdown (2026-07-26)
+
+**1. Coverage layer — see everything posted, globally, regardless of title.**
+Since title is noise, `scan.mjs`'s title-filter can't be the primary gate anymore for this use case — it would wrongly drop a great-comp senior role just because it's titled "Staff Engineer" instead of a matched keyword. Coverage has to cast wide (everything from target-domain companies/sources, any title) and push all narrowing downstream. Real lever: US pay-transparency laws (Colorado, California, New York, Washington, etc.) legally force many postings to disclose a comp range up front — useful structural signal for comp-first filtering.
+
+**2. Judgment layer — comp-weighted scoring, not title-keyword filtering.**
+Real tension: `scan.mjs` is deliberately zero-LLM/zero-cost (string matching only). Comp-floor + seniority-from-scope (not from title) + domain-fit (infra/security/platform, inferred from JD body) can't be done with keyword matching — needs content-level reading. Proposed shape (not built): two-stage funnel — stage 1 stays zero-cost (pull everything from target companies/sources, no title filter), stage 2 is a cheap-model classification/scoring pass doing the real judgment before anything reaches full `oferta.md` evaluation.
+
+**3. Off-market layer — most senior roles never get posted at all.**
+Un-scoped from India specifically (see section 2 above) — alumni-network outreach (ex-Akamai/Symantec/Nuance networks, legitimate LinkedIn alumni search, not scraping), signal-tracking (funding events, leadership moves) as outreach targets rather than scored postings.
+
+**4. Persistence layer — always-on, never stops.**
+Mechanically the easiest piece — `/loop` or `/schedule` skill already gives career-ops a recurring-run primitive. The hard part isn't "run forever," it's whether layers 1-3 produce good results each cycle.
+
+### Comp normalization — resolved direction (2026-07-26)
+Since he'll be tax-resident in India regardless of employer country, "effective value" doesn't need multi-country tax modeling — it collapses to one formula: convert gross offered comp to INR at current FX → run through Indian income tax slabs → one comparable annual net-INR number across a Germany, US, or India posting alike. Real wrinkles to keep honest, not yet solved:
+- Some postings (esp. German/EU) quote "cost to company," which includes employer-side social contributions the employee never sees — needs to be distinguished from true employee gross, or effective-value would overstate some offers.
+- Senior comp often includes bonus/equity/RSUs, not just base — still open how to value/discount these (haircut unvested equity? cash-only ranking?).
+
+### Can-they-hire-in-India — resolved direction (2026-07-26)
+Researched two real facts (not guesses):
+- **Permanent Establishment (PE) tax risk is the actual legal reason many companies exclude India from remote-eligible countries** — a foreign employer letting someone work remotely from India without a local entity risks Indian tax authorities deeming the employer to have a taxable "business connection"/PE in India. Compounded by India having no digital-nomad-visa framework.
+- **This is a solved, mainstream problem via EOR (Employer of Record) providers** — Deel, Remote.com, Multiplier, Papaya Global, Rippling, Oyster all explicitly support India; they become the local legal employer and absorb the PE risk.
+
+Signal framework for scoring "can they hire him in India" (ranked by confidence, not a hard binary — same shape as the comp scorer):
+- Strongest: company already has an India entity/office (existing India job postings from same company, India LinkedIn presence).
+- Strong: company/careers page explicitly names an EOR partner ("we hire globally via Deel/Remote/Multiplier").
+- Direct but rare: the JD itself states an eligible-countries list.
+- Majority case: no evidence either way — genuinely ambiguous, can't be cleanly automated to yes/no; needs to feed a weighted confidence score, with truly unclear cases resolved by asking (outreach/apply) rather than inferred.
+
+### Ranking architecture — resolved direction (2026-07-26)
+Not four independent scores bolted together. Shape agreed: **domain fit (infra/security/platform-adjacent) acts as a near-gate** — even a perfectly-paid, definitely-hireable-in-India role that's a domain mismatch (e.g. sales) shouldn't surface. Anything clearing that gate gets **one blended rank from comp effective-value × India-hireability-confidence**, not separate scorecards.
+
+### Self-tuning feedback loop — resolved direction (2026-07-26)
+Agreed: the system shouldn't rank once with static weights forever — it should learn from real outcomes (interview vs. silent rejection) and adjust. Real precedent already in career-ops, not hypothetical: `analyze-patterns.mjs` already tracks per-ATS-vendor advance rates (motivated by the Algorithmic Monocultures in Hiring paper). Same idea extends here — track outcomes against comp-band / India-hireability-tier / domain-fit-strength, let the blended ranking's weights shift based on what's actually converting for him, rather than staying fixed.
+
+### Equity/bonus valuation — resolved direction (2026-07-26)
+Given 18 months unemployed, priority is reliable income now, not speculative upside — so equity should NOT be co-equal with cash in the ranking:
+- **Cash (base + guaranteed/target bonus) is the primary effective-value number** — this is what gets converted to net INR and drives the main ranking.
+- **Public-company RSUs = secondary, heavily discounted factor** (real, liquid, but volatile — thinking ~40-50% off face value for price/vesting-cliff risk), not counted at face value.
+- **Private-company options = informational flag only, not counted in ranking** — illiquid, real chance of going to zero, wrong thing to optimize toward for someone who needs stable income first. This is a values judgment as much as a technical one: optimizing for "get him working and earning reliably again," not "maximize theoretical total comp."
+
+### Resume-grounded domain fit — resolved correction (2026-07-26)
+Read Amit Kumar Singh's actual CV (`/Users/adium/Downloads/amit_kumar_singh_cv (1).pdf`, 7 pages, converted via poppler `pdftotext -layout`). Corrects the earlier fuzzy "infra/security/platform" domain definition to something much more specific:
+
+**Real domain: deep, low-level systems engineering, not generic cloud/security.** C/C++ at kernel/UEFI/embedded level, compiler backend work (VLIW-TI, register allocation), drive/endpoint encryption (Symantec Endpoint Encryption — UEFI, TCG Opal V2), DLP plugin development (Symantec DLP), VPN/Zero Trust security software (current-era Akamai role — MAC/Windows/Linux/iOS/Android, UDP/TCP/IP, C/C++, Golang, Swift, Kotlin), speech SDK architecture (Nuance Dragon Medical Speech Kit — Desktop/iOS/Android SDKs), cloud VM-migration caching engines (PrimaryIO — ReadAhead, adaptive cache retention, aerospike NoSQL), embedded/IoT platforms (KOKO Networks IoT+cloud sales-promotion engine at ~1M concurrent users; Azingo Linux/LIMO mobile framework). Narrower, higher-signal target domain: **endpoint security & encryption, embedded/kernel systems, VPN/Zero Trust, SDK-level architecture** — not "cloud infra" broadly.
+
+**Genuinely dual-track: senior IC AND engineering management.** Current title "Lead Principal Software Engineer" (pure IC) at Akamai, but Senior Engineering Manager at KOKO Networks and Engineer Manager II (managed 15 engineers) at Nuance earlier. Real fluidity across the IC/EM boundary — addressable role universe should include Principal/Staff/Distinguished Engineer AND Engineering Manager/Director titles, reinforcing "title doesn't matter."
+
+**Employment gap clarified:** resume lists Akamai as "May 2023 –" with no end date (reads as still-current). Confirmed with Aditya: Akamai actually ended ~18 months ago (~early-mid 2025). Resume is stale on this point — will need the end date added before `cv.md`/outbound material is built from it. Not yet done — noted here as a known fact, not yet applied to any file.
+
+**Pedigree note, worth being deliberate about, not ignoring:** B.E. Computer Science from Mahatma Jyotiba Phule Rohilkhand University (1998-2002) — a regional university, not a pedigree-heavy institution. Positioning should lean on 22 years of hands-on technical depth and delivery track record as the lead signal, not credentials.
+
+### 2026 market-reality check — resolved (2026-07-26)
+Researched before going further, since the whole architecture hinges on whether this domain is actually still in demand:
+- **Embedded/low-level systems engineering is scarcer than ever, not fading.** Universities stopped emphasizing this ~2015; pipeline of new engineers has been thin since. Demand described as having "extraordinary momentum" (defense, aerospace, industrial automation, automotive, edge-AI). AI reshapes the role (productivity assistant) rather than replacing it — reshaping specifically favors senior engineers (junior hiring down ~25% at Big Tech, focus shifting to experienced people who validate AI-assisted output). 22 years of this depth is becoming MORE valuable, not less.
+- **Cybersecurity has a large, real demand-supply gap** — cited 3.4-3.8M global role shortfall, demand +18% YoY vs supply +9% YoY.
+- **Nuance/caveat:** hottest cybersecurity specializations right now are cloud security/IAM/DevSecOps/container security — more cloud-native than his classic endpoint/DLP/encryption background. BUT his current Akamai role is literally Zero Trust enterprise access security — one of the most modern, actively-hiring corners of the field. His most recent experience is his most market-aligned experience.
+- **Explicitly ruled out: pivoting toward "AI Engineer" framing.** Real pay premium exists for hands-on production AI/ML experience, but his resume shows none beyond a buzzword line — forcing that positioning would misrepresent him. Not the right move.
+- **Verdict/decision:** don't reframe toward AI. Build the whole architecture around what's real and market-favored — Zero Trust/enterprise security, endpoint encryption, embedded/kernel systems — leaning hardest on the Zero Trust angle since it's both his most recent role and the most in-demand part of his background.
+
+### Coverage layer — candidate company categories (discussion, not a finalized watchlist) (2026-07-26)
+Geography clarified: "Germany/Europe/USA" was illustrative of "anywhere in the world, no regional bias" — not a specific pull toward Germany. Coverage is genuinely global, any relevant company anywhere.
+
+Candidate categories discussed, anchored on the market-validated domain (Zero Trust/enterprise security, endpoint encryption, embedded/kernel systems):
+- **Zero Trust / enterprise access security** (direct competitors to his current Akamai work): Zscaler, Palo Alto Networks (Prisma Access), Cloudflare Zero Trust, Netskope, Cisco (Duo), Fortinet, CrowdStrike, Check Point, Ivanti, Citrix, Twingate. Small, well-known vendor set — genuinely tractable as a curated list, not broad scanning.
+- **Endpoint encryption / DLP / data protection** (direct lineage from his Symantec work): Broadcom (already covered), McAfee/Trellix, Digital Guardian, Sophos, ESET, Thales (CipherTrust), Forcepoint, Check Point's disk-encryption line.
+- **Embedded/kernel/low-level systems, broader than security:** Bosch, Continental, Siemens (automotive/industrial embedded — would need to bridge from security/encryption embedded work, not a direct line), Nokia, Ericsson (telecom infra embedded), Wind River (embedded RTOS specifically), secunet Security Networks (German VPN/Zero-Trust-adjacent government/enterprise security firm, cited as one example of a relevant company anywhere, not a Germany-specific priority).
+
+Estimated to land at ~30-50 real companies once fully built out — small enough that a curated watchlist is clearly the right shape, consistent with the earlier "curated watchlist vs. open scanning" conclusion, now with real names instead of a category label.
+
+### Watchlist freshness — resolved direction (2026-07-26)
+Two-cadence model, not one mechanism:
+- **High-frequency (persistence layer)** — scan the known/curated watchlist often (daily/every few days), since postings themselves change frequently. Cheap, already the existing `/loop`/`/schedule` primitive.
+- **Low-frequency "watchlist refresh" pass** — periodic (e.g. monthly), whose job is finding NEW companies worth adding, not new postings. Legitimate real sources for this: analyst category pages (Gartner Magic Quadrant, G2 category rankings for "Zero Trust Network Access," "Endpoint Protection," etc.) that exist specifically to enumerate every player in a market segment and get refreshed periodically by the analysts themselves — a low-effort, legitimate way to catch new entrants without inventing a discovery mechanism. Funding-round news (new well-funded cybersecurity startups) is another natural signal, since newly-funded companies are often about to hire senior people.
+- **Self-driven growth, secondary:** if the judgment layer reads JD content for domain fit (not just pre-approved companies), a posting that scores well on domain fit from a company NOT yet on the watchlist is itself a signal to add that company — watchlist growth partly driven by the scoring system's own findings, not purely separate research.
+
+### Off-market/outreach layer — resolved direction (2026-07-26)
+Two lanes, not just alumni:
+
+**Lane 1 — alumni (warm, shared history).** Pool is broader than the 5 headline employers: Akamai, Broadcom/Symantec, Microsoft/Nuance, PrimaryIO, KOKO Networks, Innominds, Azingo, Aztecsoft, Computer Associates, Synergy Infotech — 22 years of colleagues, many since scattered into companies possibly already on the Zero-Trust/endpoint-security watchlist. Mechanism confirmed legitimate and free: LinkedIn's native People-search "Past company" filter (no premium needed) — not scraping, exactly what the platform is built for. Opener: reconnection first ("been a while since Symantec days, would love to hear what you're working on"), not an immediate job ask — consistent with the informational-interview research from section 2.
+
+**Lane 2 — cold-but-targeted (no shared history).** Aditya's explicit addition: outreach shouldn't be limited to existing connections — also reach genuinely new people at watchlist companies. Same LinkedIn mechanism, different filter: "Current company" = target watchlist company, narrowed by relevant title keywords (Zero Trust, security engineering, endpoint protection) or recruiter/Talent-Acquisition titles. Opener has to be genuine-interest-based since there's no shared history to lean on ("saw you lead the Zero Trust team at X, I've spent 22 years in exactly this space...").
+
+**Shared rules across both lanes:**
+- Same prioritization logic as the jobs side, re-pointed at people: highest value = people at watchlist companies, people who are themselves senior/hiring-manager level, or recruiters/TA.
+- Volume discipline is critical, especially for cold lane — a handful of personalized reach-outs a week, never bulk/automated (that's exactly the behavior that gets accounts flagged and reads as spam).
+- Draft-only, matching career-ops' existing pattern (`contacto`/`email` modes are already draft-only — write the message, human sends it). Whatever this becomes, never auto-send.
+- Needs its own relationships-tracking structure parallel to the jobs pipeline (who contacted, when, response, next follow-up) — same shape as the existing `followup-cadence.mjs`/`data/follow-ups.md`, just for people. Not yet built.
+
+### Company stability / layoff-risk signal — resolved direction (2026-07-26)
+New weighted signal added to the judgment layer, alongside comp effective-value and India-hireability-confidence — same blended-rank shape, not a separate gate.
+
+**Concrete, legitimate sources (not hypothetical):**
+- **layoffs.fyi** — well-known, crowd-sourced, publicly maintained tracker built specifically to log tech-industry layoffs by company and date.
+- **LinkedIn company-page employee-count trend over time** — catches slow headcount bleed, distinct from headline layoff announcements.
+- **Funding recency, reused from the off-market layer** — a recent raise is both a hiring-likelihood signal AND a stability signal; a stale last-round with no news since is a soft warning (runway concern), not a hard disqualifier by itself.
+- **Public companies:** 10-K/10-Q "restructuring"/"cost reduction" language, stock performance, earnings-call headcount mentions — real, disclosed information.
+
+**Weighting decision: soft down-rank, not a hard exclude.** Explicitly discussed and confirmed — a stable company can still run a strategic layoff in one org while hiring in another, so a hard exclude would wrongly kill good leads. Layoff-risk lowers a company's rank within the blended score; it doesn't disqualify outright.
+
+**Continuity note:** career-ops already has an `interview-redflag` mode doing company-health/red-flag analysis, currently scoped to run post-offer (pre-joining check). This would reuse the same instinct and likely overlapping signal sources, just earlier — at discovery/ranking time instead of only after an offer. (Not yet verified against the actual mode file in this session — worth confirming exact scope before any build.)
+
+### Feedback-loop data source — resolved direction (2026-07-26)
+Splits into two honest halves:
+
+**Job-side outcomes — reuses the existing tracker, no new mechanism needed.** `data/applications.md` already records status transitions (Evaluated → Applied → Responded → Interview → Offer → Rejected → Discarded) via the canonical `set-status.mjs` path — already normal, established usage. If this new architecture's findings flow into that same tracker as pipeline entries, outcome data accumulates automatically as part of ordinary use. Only new requirement: tag each entry at evaluation time with the new signal metadata (comp-band, India-hireability-confidence tier, company-stability tier) so a periodic analysis pass can correlate outcome against those dimensions — same idea `analyze-patterns.mjs` already applies to per-ATS-vendor advance rates, just extended to more tags.
+
+**Relationship-side outcomes (alumni/cold outreach) — an honest manual gap, not a design flaw.** No mechanism can observe a LinkedIn DM thread or know a call happened unless told. Needs the relationships-tracker already flagged (parallel to `data/follow-ups.md`), filled in by an actual person as it happens. The one place a "tireless researcher" still needs a human to report back — not a missing piece of architecture, that data genuinely doesn't exist anywhere else.
+
+### Open — still narrowing down
+- Full build-out of the curated watchlist (more categories/companies beyond the candidates listed above) — not yet exhaustive.
+- Separate, not-yet-started task (outside this brainstorm): updating the real `cv.md`/profile with the corrected Akamai end date once this session moves past brainstorming.
+- Everything above is still architecture/direction only — no build has started, per explicit instruction to stay in brainstorm mode until told otherwise.
+
+---
+
+## 5. Build log — 2026-07-27/28 (brainstorm exited, real builds shipped)
+
+Real git history is the actual source of truth for what changed (`git log`); this is a summary index, not a replacement for it.
+
+**Consolidation (`4c97b97`):** wiped Aditya's own personal data (archived to `data/archive/2026-07-28-reset/`, not deleted) and promoted Amit's data into the primary `cv.md`/`config/profile.yml`/`portals.yml` slots — one workspace, no isolation layer needed anymore. `senior-search/` deleted; `compute-stability.mjs` moved to `signal-agent/`, `compute-fit.mjs` moved to repo root.
+
+**Domain-fit pipeline triage (`6f31725`):** new `filter-inbox-by-fit.mjs`, runs after every scan, moves title/location-irrelevant postings out of `data/pipeline.md` into `data/pipeline-filtered.md` (gitignored, both are personal data). Title-length-calibrated threshold (`TITLE_FIT_MIN_SCORE = 1`), separate from the full-JD gate.
+
+**Scoring wired into real evaluations (`c2d208a`):** `compute-fit.mjs --score` CLI, four new additive Machine Summary fields (`domain_fit_score`, `comp_effective_value_inr`, `india_hireability_confidence`, `fit_rank`) documented in `batch/batch-prompt.md`'s schema (source of truth for both `oferta.md` and batch workers), registered in `analyze-patterns.mjs`'s allowlist. Verified against a real evaluation (`reports/001-broadcom-2026-07-27.md`).
+
+**Domain-keyword broadening (`346fa18`):** the real Broadcom evaluation exposed `scoreDomainFit()`'s original keyword list as too narrow (scored a genuinely relevant role 12/20). Rebuilt into 3 tiers grounded in `cv.md`'s actual breadth, not just the 3 specializations named early in the brainstorm. Real Broadcom JD: 12 → 48.
+
+**Watchlist expansion, 8 → 13 confirmed companies (`ee41bff` + local `portals.yml`, gitignored):** verified real ATS/ direct APIs for Zscaler, CrowdStrike, Trellix, Thales, Forcepoint, Twingate, Cloudflare, Netskope, Ivanti, Sophos, Palo Alto Networks, Continental, Digital Guardian (Broadcom already had one). Added listing-discovery mode to `providers/jsonld-jobposting.mjs` (`job_link_pattern` field) to fix a real gap: some sites (Continental) only carry schema.org markup on individual job pages, not the listing page. Real lesson worth remembering: check the actual JSON API before assuming a JS-shell marketing page means "unscannable" — Digital Guardian's Workday tenant worked fine even though its human-facing page was a dead end (same insight that unblocked Netskope's Greenhouse board).
+
+**Still unconfirmed / genuinely blocked, not force-fit:** Check Point (confirmed custom CMS, no schema.org), Siemens (confirmed custom, no schema.org, no unified tenant), Citrix (right tenant/slug, API still 422s — deeper block, not a config gap), Bosch (JS-shell, no real links to crawl).
+
+**Current live state:** 13 companies scanning, 142 postings in the active pipeline after domain-fit triage.
+
+### Next steps, in agreed priority order (2026-07-28)
+1. **Make scoring visible in the UI** — `fit_rank`/`comp_effective_value_inr`/etc. currently only exist as raw JSON in a collapsed "Technical" section per report; need a real sortable/filterable ranked view on the pipeline itself.
+2. **Widen the watchlist further** — the two-cadence refresh idea (periodic Gartner/G2 category pages + funding news) to find new companies beyond the ~14 hand-picked ones, instead of manually researching one at a time.
+3. **Automate the cadence** — wire `scan.mjs` + `filter-inbox-by-fit.mjs` into `/loop`/`/schedule` once the ranked view (step 1) makes the output worth checking regularly.
+4. **Outreach/relationships** — still deliberately parked per `relationship-pipeline-critique.md`'s own reasoning; only build if a spreadsheet proves to be the real bottleneck after actual use.
+
