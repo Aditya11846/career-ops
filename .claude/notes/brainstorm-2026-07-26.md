@@ -274,3 +274,17 @@ Real git history is the actual source of truth for what changed (`git log`); thi
 
 **Verified live, by Aditya in a real browser, not just automated checks:** confirmed working on `/pipeline`.
 
+---
+
+## 7. Watchlist widening, first pass — 2026-07-28
+
+**Method used:** the two-cadence refresh idea from §4 — G2 category pages (Zero Trust Networking, Endpoint Protection Platforms, DLP) + recent (2026) cybersecurity funding news, rather than more hand-picked names from memory.
+
+**Honest result: 1 of 8 candidates confirmed and added.** **Proofpoint** (DLP, direct Symantec DLP lineage overlap) — Workday, 168 real postings verified live via the API, added to `portals.yml`, 15 companies now scanning.
+
+**7 candidates found but not addable yet** (ThreatLocker, Cynet, Safetica, Varonis, Elisity, Zero Networks, Cyolo) — real, domain-relevant companies, but ATS unconfirmed within the research budget spent. Worth a future verification pass, same as the original 12-unconfirmed-companies pass.
+
+**Real limitation surfaced, worth remembering before trying this method again:** WebSearch against G2's category pages returned summarized/aggregated text, not the actual rendered vendor list — the "8-12 companies per category" target wasn't really met, since the underlying pages are the same kind of JS-heavy listing that direct fetches struggle with elsewhere in this project. A future pass should try fetching G2 category pages directly (WebFetch/curl) rather than relying on WebSearch's summarization, or accept a lower per-pass yield as the norm for this method.
+
+**Live pipeline state after this pass:** 15 companies scanning, 153 relevant postings in the ranked pipeline (up from 142).
+

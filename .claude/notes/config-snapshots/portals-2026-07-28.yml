@@ -117,6 +117,15 @@ tracked_companies:
     enabled: true
     notes: "DLP specialist. Confirmed Workday API during 2026-07-28 research — the marketing page looked like a dead end (JS shell, no links) but the actual jobs API works the same way Broadcom's does, independent of the page's own rendering."
 
+  - name: Proofpoint
+    # Found via the watchlist-widening pass (G2's DLP category page), not the
+    # original hand-picked list. Confirmed Workday during 2026-07-28 research,
+    # 168 real postings tested live via the API.
+    careers_url: "https://proofpoint.wd5.myworkdayjobs.com/ProofpointCareers"
+    provider: workday
+    enabled: true
+    notes: "DLP/enterprise security, direct Symantec DLP lineage overlap. Confirmed Workday API during 2026-07-28 watchlist-widening research."
+
   - name: Sophos
     # sophos.com/en-us/careers is just a marketing page linking out — the real
     # board is a standard Lever board, confirmed live 2026-07-28.
