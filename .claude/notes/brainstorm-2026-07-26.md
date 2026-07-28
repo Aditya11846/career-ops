@@ -312,3 +312,7 @@ Real git history is the actual source of truth for what changed (`git log`); thi
 
 **Live pipeline state after this pass:** 16 companies scanning (was 15, +ThreatLocker), 159 relevant postings.
 
+**Full UI verification, not just curl (2026-07-28, `acb1a1d`):** Aditya clicked "Widen watchlist" directly on `/portals` (empty input → discovery mode) — first real test of the button itself, not the API route. It streamed to a `/jobs/{id}` page as expected and completed in 5 turns, $0.82, 62.9k tokens. Result: 5 new companies found and verified, all real, all domain-relevant, zero broken/guessed entries — Illumio (Ashby, 62 live), Cato Networks (Greenhouse, 129 live), Okta (Greenhouse, 362 live), Menlo Security (Ashby, 19 live), Tanium (Greenhouse, 43 live). Watchlist now 21 companies, 21 live, 0 broken. **This confirms the orchestrator-agent capability end-to-end through the actual dashboard UI, not just the backend** — the "Amit clicks a button" requirement is now demonstrated, not just architecturally plausible.
+
+Notably, discovery mode surfaced better/different candidates than the earlier hand-run G2 pass did (Okta, Cato Networks, Illumio weren't on the original 7-candidate G2 list at all) — the agent's own research method found real, strong matches the manual approach missed. The 7-candidate G2 list (ThreatLocker resolved; Cynet, Safetica, Varonis, Elisity, Zero Networks, Cyolo still unconfirmed) remains parked, but is now lower-priority — running "Widen watchlist" again is likely more productive than manually chasing that specific list.
+
