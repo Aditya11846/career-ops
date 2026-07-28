@@ -362,6 +362,51 @@ tracked_companies:
     enabled: true
     notes: "Network detection and response underpinning zero trust continuous verification, overlap with Amit's Zero Trust enterprise access archetype. Confirmed Greenhouse API (24 real postings) during 2026-07-28 watchlist-widening pass."
 
+  - name: Saviynt
+    # Found via privileged-access-management (PAM) funding/market research,
+    # not the original hand-picked list.
+    careers_url: "https://saviynt.com/careers"
+    api: "https://api.lever.co/v0/postings/saviynt?mode=json"
+    provider: lever
+    enabled: true
+    notes: "Identity security/privileged access management platform (Gartner PAM Challenger), zero trust enterprise access adjacent. Confirmed Lever API (117 real postings) during 2026-07-28 watchlist-widening pass."
+
+  - name: SGNL
+    # Found via privileged-access-management (PAM) funding/market research,
+    # not the original hand-picked list.
+    careers_url: "https://sgnl.ai/careers/"
+    api: "https://api.ashbyhq.com/posting-api/job-board/sgnlai"
+    provider: ashby
+    enabled: true
+    notes: "Enterprise authorization/access-management platform (Series A, identity-first zero trust), direct overlap with Amit's Zero Trust enterprise access archetype. Confirmed Ashby API (5 real postings) during 2026-07-28 watchlist-widening pass."
+
+  - name: Material Security
+    # Found via endpoint/data protection vendor research, not the original
+    # hand-picked list.
+    careers_url: "https://material.security/careers"
+    api: "https://api.ashbyhq.com/posting-api/job-board/materialsecurity"
+    provider: ashby
+    enabled: true
+    notes: "Cloud office (email/Workspace/M365) account protection and data loss prevention, overlap with the endpoint encryption/DLP archetype. Confirmed Ashby API (6 real postings) during 2026-07-28 watchlist-widening pass."
+
+  - name: Nudge Security
+    # Found via zero-trust/enterprise-access-security market research, not
+    # the original hand-picked list.
+    careers_url: "https://www.nudgesecurity.com/"
+    api: "https://api.ashbyhq.com/posting-api/job-board/nudgesecurity"
+    provider: ashby
+    enabled: true
+    notes: "SaaS/AI security governance (identity- and access-driven shadow-IT discovery), zero trust enterprise access adjacent. Confirmed Ashby API (2 real postings) during 2026-07-28 watchlist-widening pass."
+
+  - name: Axonius
+    # Found via zero-trust/asset-visibility market research, not the
+    # original hand-picked list.
+    careers_url: "https://www.axonius.com/company/careers"
+    api: "https://boards-api.greenhouse.io/v1/boards/axonius/jobs"
+    provider: greenhouse
+    enabled: true
+    notes: "Cyber asset attack surface management (device/identity inventory underpinning zero trust), overlap with Amit's Zero Trust enterprise access archetype. Confirmed Greenhouse API (26 real postings) during 2026-07-28 watchlist-widening pass."
+
 # job_boards: intentionally empty for now — this search is company-watchlist-
 # driven (curated, narrow domain), not board-driven (see brainstorm notes,
 # "curated watchlist vs. open scanning" discussion).
