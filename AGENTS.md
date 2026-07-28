@@ -123,6 +123,8 @@ AI-powered, CLI-agnostic job search automation: pipeline tracking, offer evaluat
 | `data/assessments.tsv` | Append-only skills-assessment log (user layer, created on first `add`) |
 | `jd-skill-gap.mjs` | Zero-LLM JD skill-gap checker — classifies a JD's required skills against `cv.md` into existing / supportedByResume / gap so a CV can be tailored honestly (JSON or `--summary` output); never auto-adds a claim to `cv.md` |
 | `data/follow-ups.md` | Follow-up history tracker |
+| `relationships.mjs` | Outreach/relationship tracker (person/contact) — same on-demand-recompute architecture as `followup-cadence.mjs`, no scheduler. `--add`/`--touch`/`--json`/`--summary`. Joins `signal-agent`'s stored company-heat score onto each contact's company, read-only (never computes a new score itself). |
+| `data/relationships.md` | Outreach contacts tracker (user layer, gitignored — real names): `# \| Name \| Role \| Company \| LastContact \| NextAction \| Status \| Notes` |
 | `data/blacklist.md` | Your do-not-apply company list (user layer, opt-in — never auto-populated; respected by `scan.mjs` and the `auto-pipeline`/`oferta`/`apply` gates) |
 | `scan.mjs` | Zero-token portal scanner — hits Greenhouse/Ashby/Lever APIs directly, zero LLM cost |
 | `scan-ats-full.mjs` | Reverse-ATS keyword-first scanner — walks the full public job-board-aggregator dataset per ATS provider (Greenhouse/Lever/Ashby/Workday), filtered by portals.yml's title_filter/location_filter. No company-list curation needed; complements scan.mjs's company-first model. |

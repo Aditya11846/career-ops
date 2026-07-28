@@ -54,6 +54,22 @@ Never add a company with an unconfirmed ATS, not even as a disabled placeholder 
 
 End with EXACTLY one final line: VERDICT: {number of companies confirmed and added}/5 — {names added, or "none confirmed" and why, ≤20 words}`;
   }
+  if (kind === "compute-heat") {
+    const target = input.trim();
+    return `You are computing company_heat signal scores (signal-agent/compute-heat.mjs) for career-ops, headless, on the user's own machine. Follow signal-agent/SKILL.md's real workflow EXACTLY — do not invent a different scoring method.
+
+${target ? `Score exactly ONE company: "${target}".` : `Score every company that appears in data/relationships.md's Company column AND every \`enabled: true\` company in portals.yml that does NOT already have a record in data/company-signals.json (read it first to see what's already scored — don't re-score a company scored in the last 7 days, check its updatedAt).`}
+
+For each company, in order:
+1. Funding/news — WebSearch "{company} funding OR acquisition OR layoffs {current year}" and recent press. Score a 0-100 "funding" sub-score using this rubric: 0 = nothing found/no signal, 25 = old news only (>6mo), 50 = some recent activity, 75 = a recent funding round or notable growth news, 100 = major recent funding round or hiring surge announcement. Score 0 honestly if you found nothing — do not guess.
+2. Reddit hiring chatter — WebSearch "{company} reddit hiring OR interview OR layoffs" — same 0/25/50/75/100 rubric applied to hiring-chatter evidence (0 = nothing found, 100 = strong recent chatter about active hiring).
+3. LinkedIn hiring signal — WebSearch "{company} hiring" / recruiter posting cadence over the last 30 days — same rubric shape, applied to hiring-cadence evidence.
+4. GitHub org activity — find the company's real GitHub org slug (WebSearch if not obvious), then run \`node signal-agent/compute-heat.mjs --company "{company}" --funding {N} --reddit {N} --linkedin {N} --github-org {org-slug}\` — this persists the record AND computes the GitHub sub-score itself via the GitHub API. If no GitHub org exists for this company, run the same command with \`--no-github\` instead of \`--github-org\`.
+
+This command call is what actually writes to data/company-signals.json — do not write that file directly, always go through compute-heat.mjs so the composite math stays correct.
+
+End with EXACTLY one final line: VERDICT: {number of companies scored}/5 — {company: heat score pairs, ≤20 words}`;
+  }
   if (kind === "fix-portal") {
     return `A company's job-portal ATS slug is BROKEN — career-ops can no longer scan it, so it silently disappears from every future scan. Repair it (headless, on the user's machine):
 1. Run \`node verify-portals.mjs --add "${input}"\` — it probes Greenhouse/Ashby/Lever for the company's correct ATS slug and prints the suggested ats + slug.
@@ -91,9 +107,11 @@ export async function POST(req: Request) {
     return new Response(JSON.stringify({ error: "bad json" }), { status: 400 });
   }
   const { kind = "evaluate", input, cliId } = body;
-  // widen-watchlist's input is OPTIONAL — empty means "discover new
-  // candidates" rather than "verify one specific company" (see buildPrompt).
-  if ((!input && kind !== "widen-watchlist") || !cliId) {
+  // widen-watchlist's and compute-heat's input is OPTIONAL — empty means
+  // "discover new candidates" / "score everything stale" rather than a single
+  // named target (see buildPrompt).
+  const OPTIONAL_INPUT_KINDS = ["widen-watchlist", "compute-heat"];
+  if ((!input && !OPTIONAL_INPUT_KINDS.includes(kind)) || !cliId) {
     return new Response(JSON.stringify({ error: "input and cliId required" }), { status: 400 });
   }
   const safeInput = input ?? "";
@@ -108,7 +126,7 @@ export async function POST(req: Request) {
 
   // These run the REAL core (modes/scripts), not just data — fail clearly if the
   // root is incomplete instead of faking it.
-  const needsScript: Record<string, string> = { evaluate: "modes/oferta.md", "fix-portal": "verify-portals.mjs", "widen-watchlist": "verify-portals.mjs", pdf: "generate-pdf.mjs" };
+  const needsScript: Record<string, string> = { evaluate: "modes/oferta.md", "fix-portal": "verify-portals.mjs", "widen-watchlist": "verify-portals.mjs", "compute-heat": "signal-agent/compute-heat.mjs", pdf: "generate-pdf.mjs" };
   const required = needsScript[kind];
   if (required && !fs.existsSync(path.join(careerOpsRoot(), required))) {
     return new Response(
@@ -138,7 +156,7 @@ export async function POST(req: Request) {
   // report). 'research' stays read-only. Task (sub-agents) is always blocked
   // (runaway cost). NEVER auto-submits — that is a prompt-level guarantee.
   const tools =
-    kind === "evaluate" || kind === "fix-portal" || kind === "widen-watchlist" || kind === "pdf"
+    kind === "evaluate" || kind === "fix-portal" || kind === "widen-watchlist" || kind === "compute-heat" || kind === "pdf"
       ? { allowed: "Read,WebFetch,WebSearch,Write,Edit,Bash,Glob,Grep", disallowed: "Task,NotebookEdit" }
       : { allowed: "Read,WebFetch,WebSearch,Glob,Grep", disallowed: "Bash,Write,Edit,NotebookEdit,Task" };
   const args = isClaude
