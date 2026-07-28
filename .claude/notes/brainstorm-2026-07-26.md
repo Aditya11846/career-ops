@@ -288,3 +288,15 @@ Real git history is the actual source of truth for what changed (`git log`); thi
 
 **Live pipeline state after this pass:** 15 companies scanning, 153 relevant postings in the ranked pipeline (up from 142).
 
+**PARKED, explicitly not forgotten (2026-07-28) — resume after the orchestrator (§8) is scoped/built:**
+- G2 WebFetch retry hit a 403 (G2 blocks direct fetch) — needs a different access method, not just swapping WebSearch for WebFetch.
+- 7 unverified watchlist candidates from the widening pass: ThreatLocker, Cynet, Safetica, Varonis, Elisity, Zero Networks, Cyolo.
+- Original priority-3 item: automate the scan cadence (`/loop`/`/schedule`).
+- Original priority-4 item: outreach/relationships (still parked per the critique doc's own trigger condition).
+
+---
+
+## 8. Orchestrator agent — scoping (2026-07-28)
+
+**New standing requirement, not previously scoped (see also the persistent project memory `project_careerops_orchestrator_vision.md`):** the dashboard needs a real embedded orchestrator agent (LLM-with-tools, WebSearch/WebFetch-equivalent) so Amit can run everything from the web app himself — no live Claude Code session required. Everything built so far (ATS verification, G2 research) has depended on Claude driving research interactively; that's a real gap against this target, not a finished feature.
+
