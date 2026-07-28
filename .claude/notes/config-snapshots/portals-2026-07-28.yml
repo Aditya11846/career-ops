@@ -246,6 +246,33 @@ tracked_companies:
     enabled: true
     notes: "Endpoint management/security, overlap with Amit's Symantec Endpoint Encryption/DLP lineage. Confirmed Greenhouse API (43 real postings) during 2026-07-28 watchlist-widening pass."
 
+  - name: Tailscale
+    # Found via ZTNA vendor comparison research, not the original hand-picked
+    # list.
+    careers_url: "https://tailscale.com/careers"
+    api: "https://boards-api.greenhouse.io/v1/boards/tailscale/jobs"
+    provider: greenhouse
+    enabled: true
+    notes: "Zero Trust mesh networking (WireGuard-based), direct domain overlap. Confirmed Greenhouse API (45 real postings) during 2026-07-28 watchlist-widening pass."
+
+  - name: Teleport
+    # Found via ZTNA vendor comparison research, not the original hand-picked
+    # list.
+    careers_url: "https://goteleport.com/careers/"
+    api: "https://api.ashbyhq.com/posting-api/job-board/goteleport"
+    provider: ashby
+    enabled: true
+    notes: "Zero Trust infrastructure access (identity-based, no VPN), direct domain overlap. Confirmed Ashby API (26 real postings) during 2026-07-28 watchlist-widening pass."
+
+  - name: Xage Security
+    # Found via Zero Trust microsegmentation/OT-IoT research, not the
+    # original hand-picked list.
+    careers_url: "https://xage.com/careers/"
+    api: "https://api.lever.co/v0/postings/xage-security?mode=json"
+    provider: lever
+    enabled: true
+    notes: "Zero Trust access/protection for critical infrastructure and IoT, overlap with embedded/kernel security archetype. Confirmed Lever API (10 real postings) during 2026-07-28 watchlist-widening pass."
+
 # job_boards: intentionally empty for now — this search is company-watchlist-
 # driven (curated, narrow domain), not board-driven (see brainstorm notes,
 # "curated watchlist vs. open scanning" discussion).
