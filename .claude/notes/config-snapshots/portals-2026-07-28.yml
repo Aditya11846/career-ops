@@ -317,6 +317,51 @@ tracked_companies:
     enabled: true
     notes: "Data intelligence/discovery and security platform, adjacent to the endpoint encryption/DLP archetype. Confirmed Greenhouse API (15 real postings) during 2026-07-28 watchlist-widening pass."
 
+  - name: JumpCloud
+    # Found via zero-trust/enterprise-access-security funding and vendor
+    # research, not the original hand-picked list.
+    careers_url: "https://jumpcloud.com/careers"
+    api: "https://api.lever.co/v0/postings/jumpcloud?mode=json"
+    provider: lever
+    enabled: true
+    notes: "Unified identity/device zero trust access platform, direct overlap with Amit's Zero Trust enterprise access archetype. Confirmed Lever API (17 real postings) during 2026-07-28 watchlist-widening pass."
+
+  - name: Delinea
+    # Found via privileged-access-management (PAM) vendor research, not the
+    # original hand-picked list.
+    careers_url: "https://delinea.com/careers"
+    api: "https://api.ashbyhq.com/posting-api/job-board/delinea"
+    provider: ashby
+    enabled: true
+    notes: "Privileged access management, zero trust enterprise access adjacent. Confirmed Ashby API (62 real postings) during 2026-07-28 watchlist-widening pass."
+
+  - name: BeyondTrust
+    # Found via privileged-access-management (PAM) vendor research, not the
+    # original hand-picked list.
+    careers_url: "https://www.beyondtrust.com/careers"
+    api: "https://boards-api.greenhouse.io/v1/boards/beyondtrust/jobs"
+    provider: greenhouse
+    enabled: true
+    notes: "Privileged access management, zero trust enterprise access adjacent. Confirmed Greenhouse API (50 real postings) during 2026-07-28 watchlist-widening pass."
+
+  - name: Britive
+    # Found via privileged-access-management (PAM) vendor research, not the
+    # original hand-picked list.
+    careers_url: "https://www.britive.com/careers"
+    api: "https://boards-api.greenhouse.io/v1/boards/britive/jobs"
+    provider: greenhouse
+    enabled: true
+    notes: "Cloud privileged access/identity security, zero trust enterprise access adjacent. Confirmed Greenhouse API (14 real postings) during 2026-07-28 watchlist-widening pass."
+
+  - name: Vectra AI
+    # Found via G2 Zero Trust Networking category research, not the
+    # original hand-picked list.
+    careers_url: "https://www.vectra.ai/about/jobs"
+    api: "https://boards-api.greenhouse.io/v1/boards/vectranetworks/jobs"
+    provider: greenhouse
+    enabled: true
+    notes: "Network detection and response underpinning zero trust continuous verification, overlap with Amit's Zero Trust enterprise access archetype. Confirmed Greenhouse API (24 real postings) during 2026-07-28 watchlist-widening pass."
+
 # job_boards: intentionally empty for now — this search is company-watchlist-
 # driven (curated, narrow domain), not board-driven (see brainstorm notes,
 # "curated watchlist vs. open scanning" discussion).
