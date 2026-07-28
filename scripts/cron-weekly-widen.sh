@@ -14,6 +14,13 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+# launchd's default PATH is minimal (/usr/bin:/bin:/usr/sbin:/sbin) and does
+# NOT include Homebrew — confirmed live 2026-07-28: claude's own SessionEnd
+# hook failed with "node: command not found" when triggered via
+# `launchctl kickstart` (didn't break this script's own logic, since it uses
+# absolute paths throughout, but breaks anything claude itself spawns).
+export PATH="/opt/homebrew/bin:$PATH"
+
 LOG_DIR=".claude/notes/cron-logs"
 mkdir -p "$LOG_DIR"
 LOG="$LOG_DIR/weekly-widen-$(date +%Y-%m-%d).log"

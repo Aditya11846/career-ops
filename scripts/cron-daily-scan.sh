@@ -6,6 +6,11 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+# launchd's default PATH is minimal and excludes Homebrew — this script uses
+# absolute node paths so it doesn't need this, but set for consistency/safety
+# in case a future script.mjs shells out to something on PATH.
+export PATH="/opt/homebrew/bin:$PATH"
+
 LOG_DIR=".claude/notes/cron-logs"
 mkdir -p "$LOG_DIR"
 LOG="$LOG_DIR/daily-scan-$(date +%Y-%m-%d).log"
