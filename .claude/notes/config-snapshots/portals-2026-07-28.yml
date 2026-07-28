@@ -201,6 +201,51 @@ tracked_companies:
     enabled: true
     notes: "Zero Trust / endpoint allowlisting security vendor. Confirmed Greenhouse (live API, 33 real postings) during 2026-07-28 watchlist-widening research."
 
+  - name: Illumio
+    # Found via G2 Zero Trust Networking category research, not the original
+    # hand-picked list.
+    careers_url: "https://jobs.ashbyhq.com/illumio"
+    api: "https://api.ashbyhq.com/posting-api/job-board/illumio"
+    provider: ashby
+    enabled: true
+    notes: "Zero Trust microsegmentation — direct domain overlap. Confirmed Ashby API (62 real postings) during 2026-07-28 watchlist-widening pass."
+
+  - name: Cato Networks
+    # Found via ZTNA/SASE funding-news research, not the original hand-picked
+    # list.
+    careers_url: "https://www.catonetworks.com/careers/"
+    api: "https://boards-api.greenhouse.io/v1/boards/catonetworks/jobs"
+    provider: greenhouse
+    enabled: true
+    notes: "SASE / Zero Trust Network Access vendor. Confirmed Greenhouse API (129 real postings) during 2026-07-28 watchlist-widening pass."
+
+  - name: Okta
+    # Found via G2 Zero Trust Networking category research, not the original
+    # hand-picked list.
+    careers_url: "https://www.okta.com/company/careers/"
+    api: "https://boards-api.greenhouse.io/v1/boards/okta/jobs"
+    provider: greenhouse
+    enabled: true
+    notes: "Identity/Zero Trust enterprise access security. Confirmed Greenhouse API (362 real postings) during 2026-07-28 watchlist-widening pass."
+
+  - name: Menlo Security
+    # Found via G2 Zero Trust Networking category research, not the original
+    # hand-picked list.
+    careers_url: "https://www.menlosecurity.com/careers"
+    api: "https://api.ashbyhq.com/posting-api/job-board/menlosecurity"
+    provider: ashby
+    enabled: true
+    notes: "Browser isolation / Zero Trust enterprise access security. Confirmed Ashby API (19 real postings) during 2026-07-28 watchlist-widening pass."
+
+  - name: Tanium
+    # Found via ZTNA-adjacent endpoint-security research, not the original
+    # hand-picked list.
+    careers_url: "https://www.tanium.com/careers/"
+    api: "https://boards-api.greenhouse.io/v1/boards/tanium/jobs"
+    provider: greenhouse
+    enabled: true
+    notes: "Endpoint management/security, overlap with Amit's Symantec Endpoint Encryption/DLP lineage. Confirmed Greenhouse API (43 real postings) during 2026-07-28 watchlist-widening pass."
+
 # job_boards: intentionally empty for now — this search is company-watchlist-
 # driven (curated, narrow domain), not board-driven (see brainstorm notes,
 # "curated watchlist vs. open scanning" discussion).
