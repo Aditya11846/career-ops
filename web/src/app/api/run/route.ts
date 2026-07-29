@@ -66,7 +66,7 @@ For each company, in order:
 3. LinkedIn hiring signal — WebSearch "{company} hiring" / recruiter posting cadence over the last 30 days — same rubric shape, applied to hiring-cadence evidence.
 4. GitHub org activity — find the company's real GitHub org slug (WebSearch if not obvious), then run \`node signal-agent/compute-heat.mjs --company "{company}" --funding {N} --reddit {N} --linkedin {N} --github-org {org-slug}\` — this persists the record AND computes the GitHub sub-score itself via the GitHub API. If no GitHub org exists for this company, run the same command with \`--no-github\` instead of \`--github-org\`.
 
-This command call is what actually writes to data/company-signals.json — do not write that file directly, always go through compute-heat.mjs so the composite math stays correct.
+This command call is what actually writes to data/company-signals.json — do not write that file directly, always go through compute-heat.mjs so the composite math stays correct. It also AUTOMATICALLY computes a 5th "velocity" signal from data/scan-history.tsv (no flag needed, nothing for you to research) — the printed result may show \`velocityMeta.insufficientHistory: true\` if scan history isn't old enough yet for this company; that's an honest "not enough data," not a failure, and should be reported as such if you mention it.
 
 End with EXACTLY one final line: VERDICT: {number of companies scored}/5 — {company: heat score pairs, ≤20 words}`;
   }

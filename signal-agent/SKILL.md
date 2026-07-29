@@ -1,6 +1,6 @@
 # Skill: signal-agent — company_heat scoring
 
-Computes a `company_heat` score (0-100) per company, combining four signals
+Computes a `company_heat` score (0-100) per company, combining five signals
 into one number that feeds the evaluation pipeline as a post-scoring
 adjustment (never edited into `modes/_shared.md`'s formula — see
 `compute-heat.mjs`'s file header for why).
@@ -42,15 +42,29 @@ in `portals.yml`'s `tracked_companies`):
    `sources/github-activity.md` for how to find the org slug) and it computes
    the `github` sub-score itself via GitHub's public REST API — no WebSearch
    needed for this signal.
-5. **Compute and persist:**
+5. **Job-posting velocity** — also deterministic, also no WebSearch needed.
+   `compute-heat.mjs` computes this AUTOMATICALLY from `data/scan-history.tsv`
+   (via `compute-velocity.mjs`) — nothing to pass, nothing to research. It
+   counts distinct NEW roles (deduped from reposts) first seen in the last 14
+   days. **It can legitimately come back as "insufficient history"** if
+   `scan-history.tsv` doesn't yet span 14 days for this company (confirmed
+   live 2026-07-29 — scanning had only run for 2 days, so every company's
+   velocity was insufficient-history, not a real reading). When that happens
+   it contributes 0 to the composite, but the persisted record's
+   `velocityMeta.insufficientHistory` field says why — don't report this to
+   the user as "no hiring momentum," report it as "not enough scan history
+   yet to tell."
+6. **Compute and persist:**
    ```bash
    node signal-agent/compute-heat.mjs --company "{Company}" \
      --funding {0-100} --reddit {0-100} --linkedin {0-100} \
      --github-org {org-slug}
    ```
-   This writes/updates `data/company-signals.json` (keyed by
-   `normalizeCompany()`, same normalization the tracker uses) and prints the
-   resulting record, including the composite `heat` score.
+   Velocity is computed automatically (see step 5) — no flag needed unless
+   overriding (`--velocity N`) or disabling (`--no-velocity`). This writes/
+   updates `data/company-signals.json` (keyed by `normalizeCompany()`, same
+   normalization the tracker uses) and prints the resulting record, including
+   the composite `heat` score and `velocityMeta`.
 6. **Report back** to the user: company name, composite heat, and the one or
    two strongest contributing signals (e.g. "Acme: heat 78 — Series B closed
    3 weeks ago, GitHub org shipped 4 releases this month").

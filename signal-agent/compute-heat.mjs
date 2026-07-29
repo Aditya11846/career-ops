@@ -2,8 +2,12 @@
 /**
  * signal-agent/compute-heat.mjs — company_heat scorer for career-ops
  *
- * Computes a 0-100 `company_heat` score per company from four signals
- * (job-search-automation plan, Section 4b):
+ * Computes a 0-100 `company_heat` score per company from five signals
+ * (job-search-automation plan, Section 4b + the 2026-07-29 velocity addition):
+ *   - velocity     — distinct NEW roles posted recently, deduped from reposts (fetched here
+ *                     directly from data/scan-history.tsv via compute-velocity.mjs — zero-LLM,
+ *                     zero cost, no WebSearch needed; the highest-rated signal in the original
+ *                     relationship-pipeline-signals.md research, precisely because it's free)
  *   - funding      — recent funding round / news, last 90 days (agent-researched via WebSearch,
  *                     see sources/funding-news.md — no deterministic API for this)
  *   - github       — org commit/release activity in the relevant stack (fetched here directly
@@ -13,8 +17,8 @@
  *   - linkedin     — "actively hiring" signals / recruiter posting cadence (agent-researched,
  *                     see sources/... — no public API, WebSearch/manual judgment)
  *
- * Each sub-signal is scored 0-100 by whoever computes it (this script for github,
- * the agent following sources/*.md for the other three) and combined here with a
+ * Each sub-signal is scored 0-100 by whoever computes it (this script for github and
+ * velocity, the agent following sources/*.md for the other three) and combined here with a
  * fixed weighting. Storage: data/company-signals.json, keyed by normalizeCompany()
  * (reused from tracker-utils.mjs) for consistency with how merge-tracker.mjs and
  * set-status.mjs key companies elsewhere in career-ops.
@@ -25,9 +29,12 @@
  *
  * Usage:
  *   node signal-agent/compute-heat.mjs --company "Acme Inc" \
- *     --funding 70 --reddit 40 --linkedin 55 [--github-org acme-inc] [--no-github]
- *     → computes github score live (or accept --github N to supply it directly),
- *       combines all four, writes/updates data/company-signals.json, prints the result.
+ *     --funding 70 --reddit 40 --linkedin 55 [--github-org acme-inc] [--no-github] [--no-velocity]
+ *     → computes github AND velocity scores live (or accept --github N / --velocity N to
+ *       supply either directly), combines all five, writes/updates data/company-signals.json,
+ *       prints the result. Velocity may legitimately come back as "insufficient history" if
+ *       data/scan-history.tsv doesn't yet span the lookback window for this company — see
+ *       compute-velocity.mjs's own header for why that's an honest null, not a bug.
  *
  *   node signal-agent/compute-heat.mjs --read "Acme Inc"
  *     → prints the stored signal record for a company, or null if none exists.
@@ -40,18 +47,22 @@ import { join, dirname } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 
 import { normalizeCompany, writeFileAtomic } from '../tracker-utils.mjs';
+import { jobPostingVelocity } from './compute-velocity.mjs';
 
 const SIGNAL_AGENT_DIR = dirname(fileURLToPath(import.meta.url));
 const CAREER_OPS = dirname(SIGNAL_AGENT_DIR);
 const SIGNALS_PATH = join(CAREER_OPS, 'data/company-signals.json');
 
-// Weights sum to 1.0. Funding and GitHub activity are the strongest signals of
-// real hiring capacity/urgency; Reddit and LinkedIn are softer/noisier signals.
+// Weights sum to 1.0. Velocity and GitHub are both free/deterministic
+// (zero-LLM) and the strongest real-hiring-capacity signals, so they carry
+// the most weight; funding is agent-researched but still strong; Reddit and
+// LinkedIn are the softest/noisiest signals.
 export const WEIGHTS = {
-  funding: 0.35,
-  github: 0.30,
-  reddit: 0.15,
-  linkedin: 0.20,
+  velocity: 0.30,
+  funding: 0.25,
+  github: 0.20,
+  reddit: 0.10,
+  linkedin: 0.15,
 };
 
 function clamp0to100(n) {
@@ -61,12 +72,13 @@ function clamp0to100(n) {
 }
 
 // --- Core scoring (pure function — testable without any network/agent input) ---
-export function computeHeat({ funding = 0, github = 0, reddit = 0, linkedin = 0 } = {}) {
+export function computeHeat({ funding = 0, github = 0, reddit = 0, linkedin = 0, velocity = 0 } = {}) {
   const f = clamp0to100(funding);
   const g = clamp0to100(github);
   const r = clamp0to100(reddit);
   const l = clamp0to100(linkedin);
-  const heat = f * WEIGHTS.funding + g * WEIGHTS.github + r * WEIGHTS.reddit + l * WEIGHTS.linkedin;
+  const v = clamp0to100(velocity);
+  const heat = f * WEIGHTS.funding + g * WEIGHTS.github + r * WEIGHTS.reddit + l * WEIGHTS.linkedin + v * WEIGHTS.velocity;
   return Math.round(heat);
 }
 
@@ -148,9 +160,10 @@ function assertEqual(actual, expected, label) {
 }
 
 async function runSelfTest() {
-  assertEqual(computeHeat({ funding: 100, github: 100, reddit: 100, linkedin: 100 }), 100, 'all-max signals -> heat 100');
+  assertEqual(computeHeat({ funding: 100, github: 100, reddit: 100, linkedin: 100, velocity: 100 }), 100, 'all-max signals (incl velocity) -> heat 100');
   assertEqual(computeHeat({}), 0, 'no signals -> heat 0');
   assertEqual(computeHeat({ funding: 200, github: -50 }), computeHeat({ funding: 100, github: 0 }), 'out-of-range inputs are clamped to 0-100');
+  assertEqual(computeHeat({ velocity: 300 }), computeHeat({ velocity: 100 }), 'velocity is clamped to 0-100 same as the other four signals');
 
   const weighted = computeHeat({ funding: 100, github: 0, reddit: 0, linkedin: 0 });
   assertEqual(weighted, Math.round(100 * WEIGHTS.funding), 'funding-only signal reflects its weight exactly');
@@ -218,7 +231,7 @@ async function main() {
 
   const company = parseArg(args, '--company');
   if (!company) {
-    console.error('Usage: node signal-agent/compute-heat.mjs --company "Name" --funding N --reddit N --linkedin N [--github N | --github-org slug] [--no-github]');
+    console.error('Usage: node signal-agent/compute-heat.mjs --company "Name" --funding N --reddit N --linkedin N [--github N | --github-org slug] [--no-github] [--velocity N] [--no-velocity]');
     process.exitCode = 1;
     return;
   }
@@ -236,10 +249,28 @@ async function main() {
     github = 0;
   }
 
-  const heat = computeHeat({ funding, github, reddit, linkedin });
+  // Velocity is free/deterministic like github — auto-computed from
+  // data/scan-history.tsv unless overridden or explicitly disabled. It may
+  // legitimately come back with insufficientHistory (see
+  // compute-velocity.mjs's header) — in that case velocity contributes 0 to
+  // the composite (same as "no signal found" elsewhere), but the record
+  // still notes WHY, so this isn't silently indistinguishable from "genuinely
+  // no hiring momentum."
+  let velocity = Number(parseArg(args, '--velocity') ?? NaN);
+  let velocityMeta = { newRoleCount: null, insufficientHistory: false };
+  if (Number.isNaN(velocity) && !args.includes('--no-velocity')) {
+    const result = jobPostingVelocity(company);
+    velocity = result.insufficientHistory ? 0 : result.score;
+    velocityMeta = { newRoleCount: result.newRoleCount, insufficientHistory: result.insufficientHistory };
+  } else if (Number.isNaN(velocity)) {
+    velocity = 0;
+  }
+
+  const heat = computeHeat({ funding, github, reddit, linkedin, velocity });
   const record = writeCompanySignal(company, {
     heat,
-    signals: { funding, github, reddit, linkedin },
+    signals: { funding, github, reddit, linkedin, velocity },
+    velocityMeta,
   });
 
   console.log(JSON.stringify(record, null, 2));
