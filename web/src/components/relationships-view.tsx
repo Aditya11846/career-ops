@@ -90,6 +90,17 @@ export function RelationshipsView() {
         </div>
       </div>
 
+      {/* These two actions are easy to conflate (both show up as badges on
+          the same row) — spell out the distinction plainly, not just in a
+          hover tooltip, since that's exactly the confusion this was built to
+          prevent (2026-07-29: a real click on the wrong button). */}
+      <p className="mt-3 rounded-lg border border-dashed border-border bg-surface/30 px-3 py-2 text-xs text-muted">
+        <Flame className="mr-1 inline size-3 text-orange-500" />
+        <strong className="text-foreground">Refresh company signals</strong> scores the COMPANY (funding, GitHub, hiring velocity) — it never finds people or contact info.{" "}
+        <ExternalLink className="mr-1 inline size-3 text-sky-500" />
+        <strong className="text-foreground">Find contacts</strong> (on a report page) is the only action that finds a real person&apos;s LinkedIn/email and drafts outreach.
+      </p>
+
       {showForm && <AddContactForm onDone={() => { setShowForm(false); reload(); }} />}
 
       {!available && !loading && (
@@ -305,7 +316,7 @@ function RefreshHeatButton({ job, onStart }: { job?: Job; onStart: () => void })
   return (
     <button
       onClick={onStart}
-      title="Have the agent research funding/GitHub/Reddit/LinkedIn signals for tracked companies (real cost per run)"
+      title="COMPANY-level hiring signals only (funding, GitHub activity, posting velocity, hiring chatter) — does NOT find people or contact info. Use 'Find contacts' on a report page for that."
       className="inline-flex items-center gap-2 rounded-full border border-border px-4 py-2 text-sm font-medium text-muted transition-colors hover:border-brand/40 hover:text-brand max-sm:min-h-[44px]"
     >
       <Radar className="size-4" /> Refresh company signals

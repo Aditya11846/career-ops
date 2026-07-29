@@ -44,7 +44,7 @@ export function FindContactsButton({ n, company }: { n: string; company: string 
       <button
         onClick={run}
         className="inline-flex items-center justify-center gap-1.5 rounded-full border border-border px-3 py-1 text-xs font-medium text-muted transition-colors hover:border-brand/40 hover:text-brand max-sm:min-h-[44px]"
-        title="Find the hiring manager, recruiter, and team peers for this role, and draft outreach messages (draft only, never sent automatically)"
+        title="PEOPLE, not company signals: finds the hiring manager, recruiter, and team peers for this role (real LinkedIn/email when discoverable) and drafts outreach messages (draft only, never sent automatically). For company-level hiring signals instead, use 'Refresh company signals' on the Relationships page."
       >
         <Users2 className="size-3.5" /> Find contacts
       </button>
