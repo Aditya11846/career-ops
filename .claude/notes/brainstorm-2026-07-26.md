@@ -491,3 +491,13 @@ Added as a new step in `contacto`'s prompt (`run/route.ts`): for each real perso
 
 **Honest caveat, not glossed over:** claude-in-chrome stayed disconnected for this entire polish pass — every change here is verified via clean `tsc --noEmit` and careful code review (the CSS grid-collapse technique and stagger-delay wiring were checked line-by-line against known-working patterns), but NONE of it has been visually confirmed in an actual browser yet. This is the single most important thing to check first when back.
 
+## 19. `scan-ats-full.mjs` dry-run result — correcting my own earlier recommendation (2026-07-29)
+
+Aditya stepped away with instructions to implement more ideas, polish the UI, and "think about the data sources for jobs, like we need smart routing." Researched via a forked subagent (read `providers/_registry.mjs`, `scan-ats-full.mjs`, `portals.yml`) — found a real, fully-built, zero-LLM-cost second scanner (`scan-ats-full.mjs`, walks public ATS company directories by `title_filter`/`location_filter` instead of the curated `portals.yml` list) that's never been wired into anything. Initially recommended enabling it in the summary report, with the caveat that it hadn't been dry-run yet.
+
+**Ran the actual dry-run (`--dry-run --since 3`) — it took 6+ minutes and returned almost entirely irrelevant results**: Airbus, Alleima, Aliaxis, Alcon, Abbott, Albemarle, AIA, Airzone, ABB, AgeCare, Accenture, AAA Insurance — aircraft manufacturing techs, insurance litigation attorneys, quality assurance supervisors. Zero Zero-Trust/security postings anywhere in the real sample.
+
+**Root cause, not a bug in the script**: `portals.yml`'s `title_filter` is deliberately empty by design (its own header comment: "title doesn't matter for this search... comp + domain fit do. Do not add title keywords here"). `scan-ats-full.mjs` filters ONLY by `title_filter`/`location_filter` — with both empty, it correctly does exactly what it's told: returns the entire public ATS dataset, unfiltered. That's not useful noise reduction for this project's title-agnostic search philosophy.
+
+**Corrected the recommendation given to Aditya mid-session, in the same conversation, as soon as the real data came in** — rather than let an optimistic "just enable it" recommendation stand uncorrected. To make this genuinely useful would require either a real title filter (conflicts with the existing deliberate title-agnostic design) or company-name filtering against a security-industry list first — a real design decision, not a quick toggle. Not wired into cron; left as an open, correctly-scoped question for Aditya to decide, not something I quietly enabled while he was away.
+
