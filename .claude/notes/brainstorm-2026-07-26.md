@@ -399,3 +399,24 @@ Notably, discovery mode surfaced better/different candidates than the earlier ha
 
 **Process lesson, added explicitly so it isn't just "learned this once":** `snapshot-config.mjs` needs to run BEFORE a schema-affecting edit to a live gitignored file, not just after — snapshotting after the fact only protects the NEXT loss, not this one. The 10:27 snapshot that saved 2 of 5 contacts was a lucky accident of timing (taken for an unrelated reason earlier that morning), not a deliberate pre-edit safety step. Separately: `.career-ops-web/runs/` is a real safety net for agent-research output specifically and should be checked before concluding something is unrecoverable.
 
+## 13. Contact info split into LinkedIn + Email, applying yesterday's lesson correctly (2026-07-29)
+
+**Request:** Aditya re-ran "Find contacts," it wasn't finding contact info (checked: the run he was recalling predated the LinkedIn-capture requirement — no actual new run had happened), and he explicitly wants BOTH LinkedIn AND email captured, not one blended field.
+
+**Applied the exact discipline written down after yesterday's incident, this time BEFORE touching the schema:** ran `snapshot-config.mjs` first, then made the change, then re-verified the live file parsed correctly before writing anything back — the inverse order of what caused the data loss yesterday.
+
+**Schema now: 3-way backward-compatible** (`parseRelationships` disambiguates purely by `cells.length`, each version has a fixed field count regardless of note content):
+- 7 cells → oldest (pre-Contact column, before 2026-07-28 morning)
+- 8 cells → middle (single blended Contact column, 2026-07-28 midday) — content-routed: `@`-containing non-URL values go to `email`, everything else to `linkedin`
+- 9+ cells → current (separate `LinkedIn` + `Email` columns)
+
+Self-test suite grew to 20 cases, including explicit coverage of all 3 historical shapes (the oldest-format regression test from yesterday, plus two new middle-format tests — one URL-shaped, one email-shaped — proving the content-routing heuristic works both ways).
+
+**contacto's prompt updated** (`run/route.ts`) to require attempting BOTH: a real LinkedIn URL (required, skip-with-note if genuinely not found) AND a real, *publicly verifiable* email — with an explicit, forceful non-fabrication rule: never pattern-guess an email (e.g. never assume `firstname.lastname@company.com`), since an unconfirmed guessed email is worse than none — it looks real but may not work or may reach the wrong person.
+
+**Verified for real:**
+- `node relationships.mjs --self-test` — 20/20 pass.
+- Re-ran `contacto` against report #001 for real ($1.07, 81k tokens) — this run found ZERO new contacts, correctly declining a candidate (Edward Hawkins, ex-VMware vSRC lead) because his own LinkedIn headline said "Ex-VMware," i.e. not currently there — good evidence the non-fabrication discipline extends naturally to the new LinkedIn/email fields too, though it didn't produce a positive add to verify against.
+- Separately verified the LinkedIn+Email plumbing itself (CLI → `/api/relationships` → JSON) with a synthetic add — both fields round-tripped correctly through the real API, not just the CLI. Removed the synthetic test row by hand afterward (no `--delete` command exists yet), re-ran self-test + `--json` to confirm exactly the 5 real contacts remain, re-snapshotted.
+- Browser-level UI verification (LinkedIn/Email badges rendering, form fields) was NOT completed this pass — the claude-in-chrome extension disconnected mid-session. Relying on: clean `tsc --noEmit`, the proven API-level round-trip, and that the badge-rendering logic reuses the exact same conditional-render pattern already proven working for the company-heat badge. Should be visually confirmed next time the browser extension is available.
+
