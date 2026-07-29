@@ -3,13 +3,14 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Bell, CircleHelp, Sparkles, ArrowRight } from "lucide-react";
+import { Bell, CircleHelp, Sparkles, ArrowRight, Users } from "lucide-react";
 import { instrumentSerif } from "@/lib/fonts";
 import { HeroGlow } from "@/components/hero-glow";
 import type { Application, InboxJob } from "@/lib/career-ops";
 import type { DiscoveredOffer } from "@/lib/explore";
 import { DiscoveryCard } from "@/components/explore/discovery-card";
 import { FollowUpCard, type FollowUp } from "@/components/home/follow-up-card";
+import { RelationshipFollowUpCard, type OverdueRelationship } from "@/components/home/relationship-followup-card";
 import { DecisionCard } from "@/components/home/decision-card";
 import { QuickEvaluate } from "@/components/quick-evaluate";
 
@@ -29,6 +30,7 @@ export function TodayDashboard({
 }) {
   const [followups, setFollowups] = useState<FollowUp[]>([]);
   const [overdue, setOverdue] = useState(0);
+  const [overdueRelationships, setOverdueRelationships] = useState<OverdueRelationship[]>([]);
   const [fresh, setFresh] = useState<DiscoveredOffer[]>([]);
   const router = useRouter();
   const dateLabel = useMemo(() => new Date().toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" }), []);
@@ -44,6 +46,10 @@ export function TodayDashboard({
     fetch("/api/whats-new")
       .then((r) => r.json())
       .then((d) => setFresh(Array.isArray(d.offers) ? d.offers : []))
+      .catch(() => {});
+    fetch("/api/relationships")
+      .then((r) => r.json())
+      .then((d) => setOverdueRelationships(Array.isArray(d.entries) ? d.entries.filter((e: { overdue: boolean }) => e.overdue) : []))
       .catch(() => {});
   }, []);
 
@@ -67,7 +73,8 @@ export function TodayDashboard({
   );
 
   const newThisWeek = fresh.length;
-  const allClear = newThisWeek === 0 && overdue === 0 && awaiting.length === 0;
+  const relationshipsOverdue = overdueRelationships.length;
+  const allClear = newThisWeek === 0 && overdue === 0 && awaiting.length === 0 && relationshipsOverdue === 0;
   const inboxUrls = useMemo(() => new Set(inbox.map((j) => j.url)), [inbox]);
 
   return (
@@ -96,6 +103,12 @@ export function TodayDashboard({
                     <span className="text-brand tabular-nums">{overdue}</span> follow-up{overdue === 1 ? "" : "s"} due
                   </>
                 )}
+                {(newThisWeek > 0 || overdue > 0) && relationshipsOverdue > 0 && <span className="text-faint"> · </span>}
+                {relationshipsOverdue > 0 && (
+                  <>
+                    <span className="text-brand tabular-nums">{relationshipsOverdue}</span> contact{relationshipsOverdue === 1 ? "" : "s"} need{relationshipsOverdue === 1 ? "s" : ""} outreach
+                  </>
+                )}
               </>
             )}
           </h1>
@@ -120,6 +133,17 @@ export function TodayDashboard({
           <div className="grid gap-2.5">
             {followups.map((f) => (
               <FollowUpCard key={`${f.num}-${f.company}`} followup={f} onLogged={() => setOverdue((n) => Math.max(0, n - 1))} />
+            ))}
+          </div>
+        </Section>
+      )}
+
+      {/* A2. Relationships needing outreach (demand loop, people not applications) */}
+      {overdueRelationships.length > 0 && (
+        <Section icon={Users} title="Contacts need outreach" hint="From your relationship tracker">
+          <div className="grid gap-2.5">
+            {overdueRelationships.map((r) => (
+              <RelationshipFollowUpCard key={r.n} item={r} onLogged={() => setOverdueRelationships((rows) => rows.filter((x) => x.n !== r.n))} />
             ))}
           </div>
         </Section>
