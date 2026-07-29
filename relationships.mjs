@@ -19,6 +19,7 @@
 //   node relationships.mjs --add --name N --role R --company C [--linkedin URL] [--email E] [--next-action YYYY-MM-DD] [--notes "..."]
 //   node relationships.mjs --touch <#> [--next-action YYYY-MM-DD]   mark contacted today
 //   node relationships.mjs --delete <#>                              remove one entry (numbers are stable IDs, not re-sequenced after a delete)
+//   node relationships.mjs --update <#> [--linkedin URL] [--email E] [--role R] [--notes "..."]   backfill/update fields on an EXISTING entry (only overwrites fields actually passed)
 
 import { readFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
@@ -196,6 +197,31 @@ function main() {
     return;
   }
 
+  if (args.includes('--update')) {
+    const idx = args.indexOf('--update');
+    const num = args[idx + 1];
+    const rows = load();
+    const row = rows.find((r) => r.n === num);
+    if (!row) {
+      console.error(`No relationship #${num}`);
+      process.exit(1);
+    }
+    // Only overwrite fields explicitly passed -- never blank an existing
+    // real value just because a field was omitted (e.g. backfilling
+    // linkedin alone must not wipe an already-known email).
+    const linkedin = parseArg(args, '--linkedin');
+    const email = parseArg(args, '--email');
+    const notes = parseArg(args, '--notes');
+    const role = parseArg(args, '--role');
+    if (linkedin !== undefined) row.linkedin = linkedin;
+    if (email !== undefined) row.email = email;
+    if (notes !== undefined) row.notes = notes;
+    if (role !== undefined) row.role = role;
+    writeFileAtomic(FILE, serialize(rows));
+    console.log(JSON.stringify({ updated: num }, null, 2));
+    return;
+  }
+
   const enriched = enrich(load());
 
   if (args.includes('--summary')) {
@@ -280,6 +306,19 @@ function runSelfTest() {
   const afterDelete = deleteSample.filter((r) => r.n !== '2');
   assertEqual(afterDelete.length, 2, '--delete removes exactly one row');
   assertEqual(afterDelete.map((r) => r.n), ['1', '3'], '--delete does NOT re-sequence remaining #s (stable IDs, not array indices)');
+
+  // --update uses the same "only overwrite fields actually passed" merge
+  // logic inline in main() -- exercise that exact semantic here. The
+  // critical property: backfilling ONE field (e.g. linkedin) must never
+  // blank an already-known OTHER field (e.g. email) just because it wasn't
+  // passed this time.
+  const updateTarget = { n: '1', name: 'X', linkedin: '', email: 'already-known@x.com', notes: 'old notes' };
+  const linkedinOnly = parseArg(['--linkedin', 'https://linkedin.com/in/x'], '--linkedin');
+  const updated = { ...updateTarget };
+  if (linkedinOnly !== undefined) updated.linkedin = linkedinOnly;
+  assertEqual(updated.linkedin, 'https://linkedin.com/in/x', '--update linkedin sets the new value');
+  assertEqual(updated.email, 'already-known@x.com', '--update linkedin-only does NOT blank an already-known email');
+  assertEqual(updated.notes, 'old notes', '--update linkedin-only does NOT touch notes');
 
   if (process.exitCode === 1) {
     console.error('\nSelf-test FAILED');

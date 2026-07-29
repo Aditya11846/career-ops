@@ -80,12 +80,30 @@ End with EXACTLY one final line: VERDICT: {number of companies scored}/5 — {co
    b. A real, publicly-verifiable email address IF one is genuinely discoverable (e.g., listed on the company's own team/directory page, their personal site, a conference bio, GitHub profile, a press mention). NEVER fabricate or pattern-guess an email (e.g., never assume firstname.lastname@company.com just because that's a common pattern) — an unconfirmed guessed email is worse than no email, since it looks real but may not work or may reach the wrong person. If no real email is found, leave it empty.
    If you can find the person by name/role/company but genuinely cannot find EITHER a LinkedIn URL or a real email, still add them but say so explicitly in your final report (do not silently omit the gap).
 4. For each REAL person found, classify contact type and draft the message per modes/contacto.md's persona engine (≤300 chars, no corporate-speak, never share a phone number).
-5. For each REAL person found, add them to the relationship tracker by running: \`node relationships.mjs --add --name "{Full Name}" --role "{their role/title}" --company "{Company}" --linkedin "{their real LinkedIn URL, or leave empty if genuinely not found}" --email "{their real verified email, or leave empty — NEVER a guessed pattern}" --notes "{contact type}: {the drafted message, verbatim}"\` — this is the ONLY way to persist a contact; never edit data/relationships.md directly.
+5. BEFORE adding anyone, run \`node relationships.mjs --json\` and check if a person with the SAME name (case-insensitive) at the SAME company is already tracked (confirmed real bug 2026-07-29: re-running this without checking created a duplicate "Kent Button" entry instead of filling in the original's missing contact info). If a match exists:
+   - Run \`node relationships.mjs --update {existing #} --linkedin "{...}" --email "{...}"\` to backfill ONLY the fields that were genuinely missing before (never overwrite a field that already has a real value with a new guess).
+   - Do NOT also run \`--add\` for that person.
+   If NO match exists, add them as a new entry: \`node relationships.mjs --add --name "{Full Name}" --role "{their role/title}" --company "{Company}" --linkedin "{their real LinkedIn URL, or leave empty if genuinely not found}" --email "{their real verified email, or leave empty — NEVER a guessed pattern}" --notes "{contact type}: {the drafted message, verbatim}"\`.
+   Either way, relationships.mjs's \`--add\`/\`--update\` are the ONLY way to persist a contact; never edit data/relationships.md directly.
 6. NEVER send, submit, or click anything. This is research + draft-only — the user copies and sends manually themselves.
 
 End with EXACTLY one final line: VERDICT: {number of real contacts found and added}/5 — {names + contact types, ≤20 words}
 
 Application #: ${input}`;
+  }
+  if (kind === "find-contact-info") {
+    return `You are backfilling contact info for ONE person ALREADY in career-ops' relationship tracker, headless, on the user's own machine. This is NOT contacto's discovery flow — do not find or add any new people, only fill in what's missing for this one existing entry.
+
+1. Run \`node relationships.mjs --json\` and find the entry with "n": "${input}". Read its name, role, and company — these are real, already-confirmed. Do not fabricate or alter them.
+2. WebSearch specifically for THIS named person's real LinkedIn profile URL (e.g. "{name} {company} linkedin", "{name} {role} {company}"). Use the actual URL from a real search result — never guess a slug.
+3. Also check for a real, publicly-verifiable email (their company's team/directory page, personal site, GitHub, a press mention) — NEVER pattern-guess one (e.g. never assume firstname.lastname@company.com). Leave it empty if none is genuinely discoverable.
+4. If you find neither a LinkedIn URL nor an email, say so plainly — do not fabricate either one just to have something to report.
+5. Persist ONLY what you found: \`node relationships.mjs --update ${input} [--linkedin "{url}"] [--email "{email}"]\` — omit a flag entirely if you didn't find that field, so any already-known value on this row is never blanked. Never edit data/relationships.md directly.
+6. NEVER send, submit, or click anything. Research + persist only.
+
+End with EXACTLY one final line: VERDICT: {1 if you found at least one of linkedin/email, else 0}/5 — {what was found, ≤15 words}
+
+Relationship #: ${input}`;
   }
   if (kind === "fix-portal") {
     return `A company's job-portal ATS slug is BROKEN — career-ops can no longer scan it, so it silently disappears from every future scan. Repair it (headless, on the user's machine):
@@ -143,7 +161,7 @@ export async function POST(req: Request) {
 
   // These run the REAL core (modes/scripts), not just data — fail clearly if the
   // root is incomplete instead of faking it.
-  const needsScript: Record<string, string> = { evaluate: "modes/oferta.md", "fix-portal": "verify-portals.mjs", "widen-watchlist": "verify-portals.mjs", "compute-heat": "signal-agent/compute-heat.mjs", contacto: "modes/contacto.md", pdf: "generate-pdf.mjs" };
+  const needsScript: Record<string, string> = { evaluate: "modes/oferta.md", "fix-portal": "verify-portals.mjs", "widen-watchlist": "verify-portals.mjs", "compute-heat": "signal-agent/compute-heat.mjs", contacto: "modes/contacto.md", "find-contact-info": "relationships.mjs", pdf: "generate-pdf.mjs" };
   const required = needsScript[kind];
   if (required && !fs.existsSync(path.join(careerOpsRoot(), required))) {
     return new Response(
@@ -173,7 +191,7 @@ export async function POST(req: Request) {
   // report). 'research' stays read-only. Task (sub-agents) is always blocked
   // (runaway cost). NEVER auto-submits — that is a prompt-level guarantee.
   const tools =
-    kind === "evaluate" || kind === "fix-portal" || kind === "widen-watchlist" || kind === "compute-heat" || kind === "contacto" || kind === "pdf"
+    kind === "evaluate" || kind === "fix-portal" || kind === "widen-watchlist" || kind === "compute-heat" || kind === "contacto" || kind === "find-contact-info" || kind === "pdf"
       ? { allowed: "Read,WebFetch,WebSearch,Write,Edit,Bash,Glob,Grep", disallowed: "Task,NotebookEdit" }
       : { allowed: "Read,WebFetch,WebSearch,Glob,Grep", disallowed: "Bash,Write,Edit,NotebookEdit,Task" };
   const args = isClaude

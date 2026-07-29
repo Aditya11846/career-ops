@@ -28,7 +28,7 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
-  let body: { action?: "add" | "touch" | "delete"; name?: string; role?: string; company?: string; linkedin?: string; email?: string; nextAction?: string; notes?: string; n?: string };
+  let body: { action?: "add" | "touch" | "delete" | "update"; name?: string; role?: string; company?: string; linkedin?: string; email?: string; nextAction?: string; notes?: string; n?: string };
   try {
     body = await req.json();
   } catch {
@@ -69,6 +69,21 @@ export async function POST(req: Request) {
       return Response.json(JSON.parse(stdout));
     } catch {
       return new Response(JSON.stringify({ error: "delete failed", raw: stdout }), { status: 500 });
+    }
+  }
+
+  if (body.action === "update") {
+    if (!body.n) return new Response(JSON.stringify({ error: "n required" }), { status: 400 });
+    const args = ["--update", body.n];
+    if (body.linkedin !== undefined) args.push("--linkedin", body.linkedin);
+    if (body.email !== undefined) args.push("--email", body.email);
+    if (body.role !== undefined) args.push("--role", body.role);
+    if (body.notes !== undefined) args.push("--notes", body.notes);
+    const stdout = await run(args);
+    try {
+      return Response.json(JSON.parse(stdout));
+    } catch {
+      return new Response(JSON.stringify({ error: "update failed", raw: stdout }), { status: 500 });
     }
   }
 

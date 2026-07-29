@@ -454,3 +454,22 @@ Small gap flagged by hand-editing test data out all session. `node relationships
 
 **Honest state going forward:** every company's velocity will read `insufficientHistory` for about the next 12 days (until `scan-history.tsv` spans 14 days), since scanning only started 2026-07-27. This isn't a bug to fix now — the daily cron (§9) is already accumulating the history needed; the signal becomes real automatically once enough days pass.
 
+## 17. Real UI confusion + a real duplicate bug, both fixed (2026-07-29)
+
+**Confusion caught live:** Aditya clicked "Refresh company signals" expecting it to backfill LinkedIn/email for the 5 stale contacts — it never could, that button only scores the COMPANY. Fixed at the UI level FIRST, per his explicit instruction ("before you do that make everything on the website clear") — a visible inline explainer on `/relationships` (not just a tooltip) spelling out which button does what, plus both buttons' tooltips reworded to state plainly what they do NOT do. Committed separately (`6cfbd46`) before touching any logic, exactly as asked.
+
+**The actual missing feature + a real duplicate bug, both confirmed and fixed:**
+- No action existed to backfill contact info for an ALREADY-tracked person — only `contacto`'s discovery flow existed, which can only ADD new people. Re-running it just created a second "Kent Button" entry instead of filling in the original's gap.
+- New `relationships.mjs --update <#> [--linkedin] [--email] [--role] [--notes]` — only overwrites fields actually passed, never blanks an already-known value. Self-test added (25 cases total now) covering the "backfilling one field must not blank another" property specifically.
+- New `kind: "find-contact-info"` in `run/route.ts` — takes a relationship number (not a report number, unlike `contacto`), reads that ONE existing entry's name/role/company (already-confirmed, never re-derived), WebSearches specifically for THAT person's real LinkedIn/email, persists via `--update`. Explicitly scoped to NOT discover new people — a narrower, cheaper, more honest action than re-running full discovery just to fix one gap.
+- New per-row button on `/relationships`: the "no contact info" badge is now a **button** ("no contact info — find it") when idle, a spinner when running, wired to `find-contact-info` with `input: r.n`.
+- **`contacto`'s own prompt fixed for the root cause**, not just the symptom: step 5 now requires checking `node relationships.mjs --json` for an existing name+company match BEFORE adding — if found, `--update` the existing row instead of `--add`-ing a duplicate.
+
+**Verified for real, four ways, not just self-tests:**
+1. `node relationships.mjs --self-test` — 25/25 pass.
+2. `--update` tested directly against the real data file with a throwaway value, confirmed it set the target field and left everything else (including email/notes) untouched, then reverted.
+3. **Real `find-contact-info` run against Egan Meek (#1)** — found his genuine LinkedIn (`ie.linkedin.com/in/eganmeek`, cross-referenced against a second independent source, The Org), correctly declined to guess an email, persisted via `--update`, confirmed still exactly 1 "Egan Meek" entry afterward (no duplicate).
+4. **Real re-run of full `contacto` discovery against report #001** — this is the test that actually proves the dedup fix works, not just the narrower backfill action. It found the SAME Kent Button (#3) already tracked, correctly ran `--update` (backfilled his LinkedIn) instead of `--add`, and — genuinely good behavior — **it also caught and reported the PRE-EXISTING duplicate (#6)** left over from before this fix existed, without deleting it itself ("I did not delete anything since that's a destructive edit... just say the word"). Confirmed #3 and #6 were byte-identical duplicates and deleted #6 by hand. It also surfaced one additional real candidate (Emer O'Neill, a plausibly stronger hiring-manager match given the JD's "vSRC" mention) but correctly did NOT add her since the relevant slots were already filled — offered her as an alternate rather than overriding the mode's own slot-capping rule.
+
+**State after this fix:** 5 real contacts, 0 duplicates, 2 with confirmed real LinkedIn URLs (Egan Meek, Kent Button), 3 still genuinely lacking contact info (can be individually backfilled via the new per-row button whenever useful).
+

@@ -120,7 +120,7 @@ export function RelationshipsView() {
       {!loading && sorted.length > 0 && (
         <ul className="mt-5 divide-y divide-border overflow-hidden rounded-2xl border border-border bg-surface/40">
           {sorted.map((r) => (
-            <ContactRow key={r.n} r={r} onDone={reload} />
+            <ContactRow key={r.n} r={r} onDone={reload} jobs={jobs} startJob={startJob} />
           ))}
         </ul>
       )}
@@ -128,9 +128,18 @@ export function RelationshipsView() {
   );
 }
 
-function ContactRow({ r, onDone }: { r: Relationship; onDone: () => void }) {
+function ContactRow({ r, onDone, jobs, startJob }: { r: Relationship; onDone: () => void; jobs: Job[]; startJob: ReturnType<typeof useJobs>["startJob"] }) {
   const [expanded, setExpanded] = useState(false);
   const hasNotes = r.notes.trim().length > 0;
+  const findInfoJob = useMemo(
+    () => jobs.filter((j) => j.kind === "find-contact-info" && j.input === r.n).sort((a, b) => b.startedAt - a.startedAt)[0],
+    [jobs, r.n],
+  );
+  // pick up the result once this row's own backfill job finishes
+  useEffect(() => {
+    if (findInfoJob?.status === "done") onDone();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [findInfoJob?.status]);
 
   return (
     <li className="px-4 py-3">
@@ -164,10 +173,19 @@ function ContactRow({ r, onDone }: { r: Relationship; onDone: () => void }) {
             <Mail className="size-3" /> Email
           </a>
         )}
-        {!r.linkedin && !r.email && (
-          <span title="No LinkedIn or email captured for this person yet" className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-semibold bg-amber-500/15 text-amber-700 dark:text-amber-400">
-            <AlertTriangle className="size-3" /> no contact info
+        {!r.linkedin && !r.email && findInfoJob?.status === "running" && (
+          <span className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-semibold bg-sky-500/15 text-sky-700 dark:text-sky-400">
+            <Loader2 className="size-3 animate-spin" /> searching…
           </span>
+        )}
+        {!r.linkedin && !r.email && findInfoJob?.status !== "running" && (
+          <button
+            onClick={() => startJob({ title: `Find contact info · ${r.name}`, subtitle: "real LinkedIn/email for this person (not a new search)", kind: "find-contact-info", input: r.n, page: "/relationships" })}
+            title="WebSearch specifically for THIS person's real LinkedIn/email — does not find new people"
+            className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-semibold bg-amber-500/15 text-amber-700 transition-colors hover:bg-amber-500/25 dark:text-amber-400"
+          >
+            <AlertTriangle className="size-3" /> no contact info — find it
+          </button>
         )}
         <span className="ml-auto text-xs text-muted">
           last contact {r.lastContact || "never"}
