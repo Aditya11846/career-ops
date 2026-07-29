@@ -119,8 +119,8 @@ export function RelationshipsView() {
 
       {!loading && sorted.length > 0 && (
         <ul className="mt-5 divide-y divide-border overflow-hidden rounded-2xl border border-border bg-surface/40">
-          {sorted.map((r) => (
-            <ContactRow key={r.n} r={r} onDone={reload} jobs={jobs} startJob={startJob} />
+          {sorted.map((r, i) => (
+            <ContactRow key={r.n} r={r} onDone={reload} jobs={jobs} startJob={startJob} index={i} />
           ))}
         </ul>
       )}
@@ -128,7 +128,7 @@ export function RelationshipsView() {
   );
 }
 
-function ContactRow({ r, onDone, jobs, startJob }: { r: Relationship; onDone: () => void; jobs: Job[]; startJob: ReturnType<typeof useJobs>["startJob"] }) {
+function ContactRow({ r, onDone, jobs, startJob, index }: { r: Relationship; onDone: () => void; jobs: Job[]; startJob: ReturnType<typeof useJobs>["startJob"]; index: number }) {
   const [expanded, setExpanded] = useState(false);
   const hasNotes = r.notes.trim().length > 0;
   // contacto prefixes notes with "WARM (shared employer/school): ..." or
@@ -147,7 +147,10 @@ function ContactRow({ r, onDone, jobs, startJob }: { r: Relationship; onDone: ()
   }, [findInfoJob?.status]);
 
   return (
-    <li className="px-4 py-3">
+    <li
+      className="row-lift animate-stagger-in px-4 py-3"
+      style={{ "--stagger-delay": `${Math.min(index, 10) * 35}ms` } as React.CSSProperties}
+    >
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         <span className="text-sm font-medium">{r.name}</span>
         <span className="text-xs text-faint">
@@ -214,11 +217,15 @@ function ContactRow({ r, onDone, jobs, startJob }: { r: Relationship; onDone: ()
         <TouchButton n={r.n} onDone={onDone} />
         <DeleteButton n={r.n} onDone={onDone} />
       </div>
-      {expanded && hasNotes && (
-        <div className="mt-2 rounded-lg border border-border bg-surface/60 p-3">
-          <div className="flex items-start justify-between gap-2">
-            <p className="whitespace-pre-wrap text-xs leading-relaxed text-muted">{r.notes}</p>
-            <CopyButton text={r.notes} />
+      {hasNotes && (
+        <div className={cn("grid-collapse mt-0", expanded && "is-open")}>
+          <div>
+            <div className="mt-2 rounded-lg border border-border bg-surface/60 p-3">
+              <div className="flex items-start justify-between gap-2">
+                <p className="whitespace-pre-wrap text-xs leading-relaxed text-muted">{r.notes}</p>
+                <CopyButton text={r.notes} />
+              </div>
+            </div>
           </div>
         </div>
       )}

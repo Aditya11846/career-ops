@@ -30,7 +30,7 @@ export function FollowUpCard({ followup, onLogged }: { followup: FollowUp; onLog
   };
 
   return (
-    <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-border bg-surface/40 px-3.5 py-3 transition hover:border-brand/30">
+    <div className="row-lift flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-border bg-surface/40 px-3.5 py-3 transition hover:border-brand/30">
       <div className="flex min-w-0 flex-[1_1_55%] items-center gap-3">
         <CompanyLogo name={followup.company} size={22} />
         <div className="min-w-0 flex-1">

@@ -102,10 +102,14 @@ export function PortalsView() {
             </div>
           )}
           <ul className="mt-4 divide-y divide-border overflow-hidden rounded-2xl border border-border bg-surface/40">
-            {sorted.map((c) => {
+            {sorted.map((c, i) => {
               const t = TONE[c.status] ?? TONE.skipped;
               return (
-                <li key={c.name} className="flex items-center gap-3 px-4 py-2.5">
+                <li
+                  key={c.name}
+                  className="row-lift animate-stagger-in flex items-center gap-3 px-4 py-2.5"
+                  style={{ "--stagger-delay": `${Math.min(i, 12) * 25}ms` } as React.CSSProperties}
+                >
                   <CompanyLogo name={c.name} size={20} />
                   <span className={cn("size-1.5 shrink-0 rounded-full", t.dot)} />
                   <span className="shrink-0 text-sm font-medium">{c.name}</span>

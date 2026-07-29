@@ -133,6 +133,56 @@ html {
   .job-indeterminate::after { animation: none; width: 100%; opacity: 0.35; }
 }
 
+/* ── "Flow" pass (2026-07-29): tasteful motion on top of the existing
+   editorial system above — never a new visual language, just smoother
+   transitions between states that were previously instant/abrupt. ── */
+
+/* Row-lift: a subtle hover affordance for list/card rows across the app
+   (relationships, pipeline, portals). Pairs with the existing
+   hover:border-brand/40 convention already used everywhere. */
+.row-lift {
+  transition: transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease;
+}
+.row-lift:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px -6px color-mix(in srgb, var(--fg) 12%, transparent);
+}
+
+/* Grid-rows expand/collapse: smooth height transition with zero JS height
+   measurement (modern grid-template-rows animation). Wrap collapsible
+   content in a single child div for the fr-unit transition to apply to. */
+.grid-collapse {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 220ms ease;
+}
+.grid-collapse.is-open {
+  grid-template-rows: 1fr;
+}
+.grid-collapse > div {
+  overflow: hidden;
+  min-height: 0;
+}
+
+/* Staggered list entrance — same fade-in-delayed keyframe already used for
+   the hero, applied per-row via an inline --stagger-delay custom property
+   (set from React as style={{ "--stagger-delay": `${i * 40}ms` }}). */
+@keyframes stagger-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-stagger-in {
+  animation: stagger-in 320ms ease both;
+  animation-delay: var(--stagger-delay, 0ms);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .row-lift { transition: none; }
+  .row-lift:hover { transform: none; box-shadow: none; }
+  .grid-collapse { transition: none; }
+  .animate-stagger-in { animation: none; }
+}
+
 /* ── Report / CV markdown prose (theme-aware) ───────────────────────────── */
 .report-prose {
   color: color-mix(in srgb, var(--fg) 88%, transparent);
