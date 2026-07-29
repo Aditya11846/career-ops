@@ -131,6 +131,11 @@ export function RelationshipsView() {
 function ContactRow({ r, onDone, jobs, startJob }: { r: Relationship; onDone: () => void; jobs: Job[]; startJob: ReturnType<typeof useJobs>["startJob"] }) {
   const [expanded, setExpanded] = useState(false);
   const hasNotes = r.notes.trim().length > 0;
+  // contacto prefixes notes with "WARM (shared employer/school): ..." or
+  // "COLD: ..." (no schema change — parsed from the existing notes text
+  // rather than a new column, since this data is display-only annotation).
+  const warmMatch = r.notes.match(/^WARM\s*\(([^)]+)\)\s*:/i);
+  const isCold = /^COLD\s*:/i.test(r.notes);
   const findInfoJob = useMemo(
     () => jobs.filter((j) => j.kind === "find-contact-info" && j.input === r.n).sort((a, b) => b.startedAt - a.startedAt)[0],
     [jobs, r.n],
@@ -192,6 +197,12 @@ function ContactRow({ r, onDone, jobs, startJob }: { r: Relationship; onDone: ()
           {r.nextAction && <> · next {r.nextAction}</>}
         </span>
         {r.overdue && <span className="rounded px-1.5 py-0.5 text-[10px] font-semibold bg-red-500/15 text-red-700 dark:text-red-400">overdue</span>}
+        {warmMatch && (
+          <span title={`Shared connection: ${warmMatch[1]}`} className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-semibold bg-emerald-500/15 text-emerald-700 dark:text-emerald-400">
+            <Flame className="size-3" /> warm · {warmMatch[1]}
+          </span>
+        )}
+        {isCold && <span className="rounded px-1.5 py-0.5 text-[10px] font-semibold bg-surface-hover text-faint">cold outreach</span>}
         {hasNotes && (
           <button
             onClick={() => setExpanded((e) => !e)}

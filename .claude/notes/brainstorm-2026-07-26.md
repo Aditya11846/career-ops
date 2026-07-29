@@ -473,3 +473,15 @@ Small gap flagged by hand-editing test data out all session. `node relationships
 
 **State after this fix:** 5 real contacts, 0 duplicates, 2 with confirmed real LinkedIn URLs (Egan Meek, Kent Button), 3 still genuinely lacking contact info (can be individually backfilled via the new per-row button whenever useful).
 
+## 18. Autonomous work session while Aditya stepped away (2026-07-29)
+
+Instructions on stepping away: implement more ideas, polish the UI, push/update notes periodically, explain what happened with WebSearch, think about job-data-source "smart routing," and produce a clean summary for manual testing on return — explicitly framed as "close to production v1."
+
+**Priority-3 item shipped: warm-path/alumni overlap detection for `contacto`** — the single highest-leverage idea from the planning-doc synthesis (yesterday, §15), since cold outreach converts ~2-8% vs. 40-65% for a genuine shared-employer/school connection.
+
+Added as a new step in `contacto`'s prompt (`run/route.ts`): for each real person found, check their LinkedIn/bio against Amit's OWN employer/school history from `cv.md` (read fresh each run, not hardcoded — the prompt explicitly says not to trust the copy embedded in the prompt text if `cv.md` has changed). A genuine overlap = the SAME employer/school in both, not "also worked in security." When real, lead the message with it and prefix notes `WARM ({shared employer/school}):`; when not, prefix `COLD:`. No schema change — parsed from the existing notes text in the UI via a regex, not a new relationships.md column (avoids repeating the exact class of migration risk from §12/§13).
+
+**Real test result, genuinely good, not just plausible:** re-ran `contacto` against report #001. It correctly recognized all 5 existing contacts (no duplicates — the dedup fix from §17 held), backfilled 3 missing LinkedIn URLs via fresh search, and found ONE genuine overlap: **Ken Williams worked at "CA Technologies"** — the agent correctly reasoned that CA Technologies is the post-2006 rebrand of "Computer Associates (CA)," where Amit's `cv.md` lists a 2005 role. This is real domain reasoning, not a keyword match (the strings "CA Technologies" and "Computer Associates (CA)" don't share enough characters for a naive fuzzy match — the agent had to know the corporate-history fact that one company became the other). It rewrote Ken Williams' message to lead with the specific shared year and tagged it `WARM (CA Technologies)`; left the other 4 as `COLD` since no genuine overlap existed for them. Confirmed persisted correctly via the API afterward (still exactly 5 entries, Ken Williams' notes correctly prefixed), and verified the UI's badge-extraction regex correctly parses `"CA Technologies"` out of the real persisted string. Cost: $0.81, 61.5k tokens.
+
+**Consistent with the session's honesty discipline:** the agent explicitly declined to retroactively rewrite the other 4 pre-existing entries' messages just to tag them WARM/COLD ("wasn't broken, only backfilled contact info per the dedup rule") — conservative, minimal-touch behavior rather than over-eager rewriting.
+
