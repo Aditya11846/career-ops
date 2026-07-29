@@ -28,7 +28,7 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
-  let body: { action?: "add" | "touch"; name?: string; role?: string; company?: string; linkedin?: string; email?: string; nextAction?: string; notes?: string; n?: string };
+  let body: { action?: "add" | "touch" | "delete"; name?: string; role?: string; company?: string; linkedin?: string; email?: string; nextAction?: string; notes?: string; n?: string };
   try {
     body = await req.json();
   } catch {
@@ -59,6 +59,16 @@ export async function POST(req: Request) {
       return Response.json(JSON.parse(stdout));
     } catch {
       return new Response(JSON.stringify({ error: "touch failed", raw: stdout }), { status: 500 });
+    }
+  }
+
+  if (body.action === "delete") {
+    if (!body.n) return new Response(JSON.stringify({ error: "n required" }), { status: 400 });
+    const stdout = await run(["--delete", body.n]);
+    try {
+      return Response.json(JSON.parse(stdout));
+    } catch {
+      return new Response(JSON.stringify({ error: "delete failed", raw: stdout }), { status: 500 });
     }
   }
 

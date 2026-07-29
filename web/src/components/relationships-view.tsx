@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Loader2, Radar, Plus, Flame, ChevronDown, Copy, Check, ExternalLink, Mail, AlertTriangle } from "lucide-react";
+import { Loader2, Radar, Plus, Flame, ChevronDown, Copy, Check, ExternalLink, Mail, AlertTriangle, Trash2 } from "lucide-react";
 import { useJobs, type Job } from "@/components/jobs/job-store";
 import { cn } from "@/lib/cn";
 
@@ -172,6 +172,7 @@ function ContactRow({ r, onDone }: { r: Relationship; onDone: () => void }) {
           </button>
         )}
         <TouchButton n={r.n} onDone={onDone} />
+        <DeleteButton n={r.n} onDone={onDone} />
       </div>
       {expanded && hasNotes && (
         <div className="mt-2 rounded-lg border border-border bg-surface/60 p-3">
@@ -256,6 +257,40 @@ function TouchButton({ n, onDone }: { n: string; onDone: () => void }) {
   return (
     <button onClick={touch} disabled={busy} title="Mark as contacted today" className="rounded-md border border-border px-2 py-1 text-xs text-muted transition-colors hover:border-brand/40 hover:text-brand disabled:opacity-50">
       {busy ? "…" : "Contacted today"}
+    </button>
+  );
+}
+
+function DeleteButton({ n, onDone }: { n: string; onDone: () => void }) {
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  async function del() {
+    setBusy(true);
+    await fetch("/api/relationships", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "delete", n }),
+    });
+    setBusy(false);
+    onDone();
+  }
+
+  if (confirming)
+    return (
+      <span className="inline-flex items-center gap-1">
+        <button onClick={del} disabled={busy} className="rounded-md border border-red-500/40 bg-red-500/10 px-2 py-1 text-xs font-medium text-red-700 disabled:opacity-50 dark:text-red-400">
+          {busy ? "…" : "Confirm delete"}
+        </button>
+        <button onClick={() => setConfirming(false)} disabled={busy} className="rounded-md border border-border px-2 py-1 text-xs text-muted hover:text-brand disabled:opacity-50">
+          Cancel
+        </button>
+      </span>
+    );
+
+  return (
+    <button onClick={() => setConfirming(true)} title="Remove this contact" className="rounded-md border border-border p-1.5 text-faint transition-colors hover:border-red-500/40 hover:text-red-600 dark:hover:text-red-400">
+      <Trash2 className="size-3" />
     </button>
   );
 }

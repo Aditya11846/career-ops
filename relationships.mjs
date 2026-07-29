@@ -18,6 +18,7 @@
 //   node relationships.mjs --summary                     human-readable table
 //   node relationships.mjs --add --name N --role R --company C [--linkedin URL] [--email E] [--next-action YYYY-MM-DD] [--notes "..."]
 //   node relationships.mjs --touch <#> [--next-action YYYY-MM-DD]   mark contacted today
+//   node relationships.mjs --delete <#>                              remove one entry (numbers are stable IDs, not re-sequenced after a delete)
 
 import { readFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
@@ -180,6 +181,21 @@ function main() {
     return;
   }
 
+  if (args.includes('--delete')) {
+    const idx = args.indexOf('--delete');
+    const num = args[idx + 1];
+    const rows = load();
+    const before = rows.length;
+    const filtered = rows.filter((r) => r.n !== num);
+    if (filtered.length === before) {
+      console.error(`No relationship #${num}`);
+      process.exit(1);
+    }
+    writeFileAtomic(FILE, serialize(filtered));
+    console.log(JSON.stringify({ deleted: num }, null, 2));
+    return;
+  }
+
   const enriched = enrich(load());
 
   if (args.includes('--summary')) {
@@ -256,6 +272,14 @@ function runSelfTest() {
 
   assertEqual(nextNum([]), 1, 'nextNum starts at 1 on empty');
   assertEqual(nextNum([{ n: '3' }, { n: '1' }]), 4, 'nextNum is max+1, not length+1');
+
+  // --delete uses the same rows.filter((r) => r.n !== num) logic inline in
+  // main() -- exercise that exact semantic here rather than duplicating it,
+  // since main() only runs against the real FILE (no dependency injection).
+  const deleteSample = [{ n: '1', name: 'Keep Me' }, { n: '2', name: 'Delete Me' }, { n: '3', name: 'Keep Me Too' }];
+  const afterDelete = deleteSample.filter((r) => r.n !== '2');
+  assertEqual(afterDelete.length, 2, '--delete removes exactly one row');
+  assertEqual(afterDelete.map((r) => r.n), ['1', '3'], '--delete does NOT re-sequence remaining #s (stable IDs, not array indices)');
 
   if (process.exitCode === 1) {
     console.error('\nSelf-test FAILED');
