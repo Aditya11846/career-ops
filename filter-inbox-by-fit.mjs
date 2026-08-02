@@ -37,11 +37,18 @@ import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
-import { scoreDomainFit } from './compute-fit.mjs';
+import { scoreDomainFit, classifyGeoEligibility, GEO_GATE_CONFIDENCE_THRESHOLD } from './compute-fit.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const PIPELINE_PATH = join(ROOT, 'data/pipeline.md');
 const FILTERED_PATH = join(ROOT, 'data/pipeline-filtered.md');
+// SEPARATE from the domain-fit filtered file on purpose (2026-08-02 brainstorm
+// item #6, "make it visible, not a black box") — a posting excluded for
+// "wrong domain" and one excluded for "structurally unreachable from India"
+// are different failure modes with different fixes (broaden keywords vs.
+// nothing to fix, it's just not viable), so they stay in separate files
+// rather than one undifferentiated "filtered" bucket.
+const GEO_FILTERED_PATH = join(ROOT, 'data/pipeline-geo-filtered.md');
 
 // compute-fit.mjs's DOMAIN_FIT_GATE_THRESHOLD (20) is calibrated for full JD
 // paragraph text at evaluation time, where several keyword phrases can appear
@@ -65,6 +72,25 @@ deleted; move an entry back into data/pipeline.md's "## Pending" section
 manually if it was filtered by mistake.
 
 ## Filtered
+
+`;
+
+const GEO_FILTERED_SKELETON = `# Pipeline — Filtered (geo-restricted, not reachable from India)
+
+Entries moved here by filter-inbox-by-fit.mjs — the location field carried
+explicit evidence this posting is restricted to a specific non-India country
+(e.g. "USA - Remote", "Canada - Remote AB", a bare US/other city with no
+remote qualifier) rather than genuinely global or India-eligible remote.
+See compute-fit.mjs's classifyGeoEligibility() for the detection logic and
+GEO_GATE_CONFIDENCE_THRESHOLD for the cutoff. This is a DIFFERENT failure
+mode from domain-fit filtering (data/pipeline-filtered.md) — these postings
+may be a perfect skills match, they are just not viable given a fixed,
+India-based, remote-only (or Pune-hybrid) location constraint. Nothing here
+is deleted; move an entry back into data/pipeline.md's "## Pending" section
+manually if it was filtered by mistake (e.g. a company confirmed elsewhere to
+hire via an EOR).
+
+## Geo-filtered
 
 `;
 
@@ -103,9 +129,9 @@ function findPendingSectionBounds(lines) {
   return { start, end };
 }
 
-function loadExistingFilteredUrls() {
-  if (!existsSync(FILTERED_PATH)) return new Set();
-  const text = readFileSync(FILTERED_PATH, 'utf-8');
+function loadExistingUrlsFrom(path) {
+  if (!existsSync(path)) return new Set();
+  const text = readFileSync(path, 'utf-8');
   const urls = new Set();
   for (const match of text.matchAll(/- \[[ xX]\] (https?:\/\/\S+)/g)) urls.add(match[1]);
   return urls;
@@ -129,9 +155,11 @@ function main() {
     return;
   }
 
-  const alreadyFiltered = loadExistingFilteredUrls();
+  const alreadyDomainFiltered = loadExistingUrlsFrom(FILTERED_PATH);
+  const alreadyGeoFiltered = loadExistingUrlsFrom(GEO_FILTERED_PATH);
   const kept = [];
-  const moved = [];
+  const movedDomain = [];
+  const movedGeo = [];
 
   for (let i = bounds.start + 1; i < bounds.end; i++) {
     const line = lines[i];
@@ -140,38 +168,50 @@ function main() {
       kept.push(line); // blank lines / non-checkbox content pass through untouched
       continue;
     }
-    if (alreadyFiltered.has(parsed.url)) {
+    if (alreadyDomainFiltered.has(parsed.url) || alreadyGeoFiltered.has(parsed.url)) {
       // Already moved in a prior run — idempotent no-op, drop from pending
-      // without re-scoring or duplicating into the filtered file again.
-      moved.push(parsed);
+      // without re-scoring or duplicating into a filtered file again.
       continue;
     }
     const fitScore = scoreDomainFit(`${parsed.role} ${parsed.location || ''}`);
     if (fitScore < TITLE_FIT_MIN_SCORE) {
-      moved.push({ ...parsed, fitScore });
-    } else {
-      kept.push(line);
+      movedDomain.push({ ...parsed, fitScore });
+      continue;
     }
+    // Domain fit passed — now check geo eligibility independently. A posting
+    // can be a perfect skills match AND structurally unreachable from India;
+    // these are different failure modes (see GEO_FILTERED_SKELETON), checked
+    // and filed separately, not conflated into one "filtered" reason.
+    const geo = classifyGeoEligibility({ locationText: parsed.location || '' });
+    if (geo.tier === 'restricted' && geo.confidence < GEO_GATE_CONFIDENCE_THRESHOLD) {
+      movedGeo.push({ ...parsed, geoEvidence: geo.evidence });
+      continue;
+    }
+    kept.push(line);
   }
 
-  const newlyMoved = moved.filter(m => m.fitScore !== undefined);
-
   if (summaryOnly) {
-    console.log(`Pending: ${bounds.end - bounds.start - 1 - newlyMoved.length - (moved.length - newlyMoved.length)} kept, ${newlyMoved.length} newly filtered, ${moved.length - newlyMoved.length} already filtered (skipped).`);
+    const stillPending = bounds.end - bounds.start - 1 - movedDomain.length - movedGeo.length - alreadyDomainFiltered.size - alreadyGeoFiltered.size;
+    console.log(`Pending: ${Math.max(0, stillPending)} kept, ${movedDomain.length} newly domain-filtered, ${movedGeo.length} newly geo-filtered.`);
     return;
   }
 
-  console.log(`Domain-fit filter: ${newlyMoved.length} moved to data/pipeline-filtered.md, ${kept.filter(l => parseCheckboxLine(l)).length} stay in data/pipeline.md.`);
-  for (const m of newlyMoved) {
+  console.log(`Domain-fit filter: ${movedDomain.length} moved to data/pipeline-filtered.md.`);
+  for (const m of movedDomain) {
     console.log(`  - ${m.company} | ${m.role} (fit score ${m.fitScore}) → filtered`);
   }
+  console.log(`Geo filter: ${movedGeo.length} moved to data/pipeline-geo-filtered.md.`);
+  for (const m of movedGeo) {
+    console.log(`  - ${m.company} | ${m.role} (${m.geoEvidence}) → geo-filtered`);
+  }
+  console.log(`${kept.filter(l => parseCheckboxLine(l)).length} stay in data/pipeline.md.`);
 
   if (dryRun) {
     console.log('\n(dry run — no files written)');
     return;
   }
 
-  if (newlyMoved.length === 0) {
+  if (movedDomain.length === 0 && movedGeo.length === 0) {
     console.log('Nothing to move.');
     return;
   }
@@ -180,14 +220,23 @@ function main() {
   const newLines = [...lines.slice(0, bounds.start + 1), ...kept, ...lines.slice(bounds.end)];
   writeFileSync(PIPELINE_PATH, newLines.join('\n'), 'utf-8');
 
-  // Append newly-moved entries to data/pipeline-filtered.md, creating it if absent.
-  if (!existsSync(FILTERED_PATH)) writeFileSync(FILTERED_PATH, FILTERED_SKELETON, 'utf-8');
-  const filteredLines = newlyMoved
-    .map(m => `- [ ] ${m.url} | ${m.company} | ${m.role}${m.location ? ` | ${m.location}` : ''} (fit score: ${m.fitScore})`)
-    .join('\n') + '\n';
-  writeFileSync(FILTERED_PATH, readFileSync(FILTERED_PATH, 'utf-8') + filteredLines, 'utf-8');
+  if (movedDomain.length > 0) {
+    if (!existsSync(FILTERED_PATH)) writeFileSync(FILTERED_PATH, FILTERED_SKELETON, 'utf-8');
+    const filteredLines = movedDomain
+      .map(m => `- [ ] ${m.url} | ${m.company} | ${m.role}${m.location ? ` | ${m.location}` : ''} (fit score: ${m.fitScore})`)
+      .join('\n') + '\n';
+    writeFileSync(FILTERED_PATH, readFileSync(FILTERED_PATH, 'utf-8') + filteredLines, 'utf-8');
+  }
 
-  console.log(`\nWrote changes to data/pipeline.md and data/pipeline-filtered.md.`);
+  if (movedGeo.length > 0) {
+    if (!existsSync(GEO_FILTERED_PATH)) writeFileSync(GEO_FILTERED_PATH, GEO_FILTERED_SKELETON, 'utf-8');
+    const geoLines = movedGeo
+      .map(m => `- [ ] ${m.url} | ${m.company} | ${m.role}${m.location ? ` | ${m.location}` : ''} (${m.geoEvidence})`)
+      .join('\n') + '\n';
+    writeFileSync(GEO_FILTERED_PATH, readFileSync(GEO_FILTERED_PATH, 'utf-8') + geoLines, 'utf-8');
+  }
+
+  console.log(`\nWrote changes to data/pipeline.md, data/pipeline-filtered.md, and data/pipeline-geo-filtered.md.`);
 }
 
 main();

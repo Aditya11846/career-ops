@@ -139,33 +139,133 @@ export function computeTotalEffectiveValueINR(components = [], fxRatesToInr = FA
   return { netInr: Math.round(netInr), excludedGrossInr: Math.round(excludedGrossInr), details };
 }
 
-// ── India-hireability confidence (weighted, not binary) ────────────────────
+// ── Geo eligibility taxonomy (2026-08-02) ───────────────────────────────────
+// The core finding that motivated this: "Remote" is meaningless without
+// knowing FROM WHERE. A posting saying "Remote" that actually means
+// "remote-within-the-US" is not reachable from India — but the old scorer
+// below only detected POSITIVE evidence (an India entity, an EOR mention, a
+// JD explicitly listing India as eligible) and fell back to the SAME neutral
+// baseline for both "no info either way" and "explicitly US-only." Those are
+// not the same thing, and conflating them means some real fraction of a
+// senior candidate's 1.8-year search may have gone into applying to roles
+// that were structurally impossible from day one, not lost on merit. Fixing
+// this detection was named the single highest-leverage change in this
+// project (2026-08-02 brainstorm) — ahead of any scoring refinement.
+//
+// Grounded in real location strings pulled from this project's own
+// data/scan-history.tsv, not assumed patterns — e.g. confirmed real values:
+// "USA - Remote", "Bangalore, India - Remote", "Canada - Remote AB",
+// "Distributed" (bare = genuinely global) vs "APAC - Distributed (Taiwan)" /
+// "US - Distributed" (region-qualified = NOT global), "IND-Pune EON Kharadi
+// Infrastructure", "Bangalore, IND; Hyderabad, IND; Mohali, IND; Pune, IND".
+
+const GEO_TIERS = /** @type {const} */ (['india-eligible', 'global-remote', 'restricted', 'unknown']);
+
+// Word-boundary matched — "India" as a substring would false-positive on
+// "Indiana" (confirmed live: /india/.test("Indiana") is true, /\bindia\b/ is
+// false). "IND" as a 3-letter country code appears in real scan data too
+// ("Bangalore, IND") but is too short to word-boundary-match safely against
+// unrelated words, so it's matched only as a comma/semicolon-delimited token.
+const INDIA_PATTERN = /\bindia\b/i;
+// "IND" as a standalone token (confirmed live: \b handles comma/semicolon/
+// hyphen/space/start/end delimiters uniformly, e.g. real data "IND-Pune EON
+// Kharadi Infrastructure" and "Bangalore, IND; Hyderabad, IND" both match;
+// "Indiana"/"Industry" do not, since there's no boundary mid-word).
+const INDIA_CODE_PATTERN = /\bind\b/i;
+
+// Bare "distributed"/"worldwide"/explicit "anywhere" phrasing. Deliberately
+// does NOT match region-qualified distributed ("APAC - Distributed (Taiwan)",
+// "US - Distributed") — those are real, confirmed-live false positives for
+// "global" that a naive "distributed" substring match would have caught.
+const GLOBAL_REMOTE_PATTERN = /(^|[,;·]\s*)(distributed|worldwide)\s*($|[,;·(])|work from anywhere|remote[\s-]*(global|anywhere)|fully remote,?\s*global/i;
+
+// Specific non-India countries/major hiring hubs/US states seen in this
+// project's real scan data. When one of these matches WITHOUT an India
+// mention, that's real negative evidence — not silence.
+const OTHER_COUNTRY_PATTERN =
+  /\b(usa?|u\.s\.a?\.?|united states|canada|u\.?k\.?|united kingdom|singapore|israel|germany|france|austria|brazil|hungary|australia|japan|taiwan|dubai|uae|mexico|ireland|netherlands|spain|italy|poland|philippines|vietnam|china)\b|\b(california|colorado|washington|texas|new york|illinois|georgia|florida|virginia|massachusetts|new jersey|ontario|alberta|british columbia)\b/i;
+
+// Workday's own "XXX-City" location format uses 3-letter country codes with
+// no spelled-out country name at all (e.g. real data: "SGP-Yishun",
+// "IRL-Cork-Kavanagh House", "AUT-Vienna Am Europlatz 5") — the word-based
+// pattern above can't catch these since the country name never appears.
+// This is the exact, finite set of codes confirmed present in this project's
+// own scan-history.tsv (excluding IND, which is positive evidence, handled
+// separately by INDIA_CODE_PATTERN above) — not a guessed broad list.
+const WORKDAY_COUNTRY_CODE_PATTERN = /\b(aus|aut|bra|chn|cze|irl|isr|jpn|sgp|usa)-/i;
+
+// Explicit work-authorization / citizenship / clearance language — the
+// strongest possible negative signal, usually only findable in full JD text
+// (not the short location field), so this matters most at full-evaluation
+// time (see modes/oferta.md) rather than the cheap inbox stage.
+const WORK_AUTH_NEGATIVE_PATTERN =
+  /\b(us|u\.s\.)\s*citizens?\s*(only|required)\b|must be (?:a )?(?:us|u\.s\.)\s*citizen|authorized to work in the (?:united states|us)\s*(without sponsorship)?|not (?:eligible|able) (?:for|to provide) (?:visa )?sponsorship|security clearance required|active (?:secret|top secret) clearance|must (?:currently )?reside in the (?:united states|us|uk)|this (?:role|position) is not (?:eligible for )?remote (?:work )?outside/i;
+
+/**
+ * Classify geo eligibility into a real taxonomy instead of one blended
+ * number — brainstorm items #1 (negative detection) + #2 (taxonomy) +
+ * #3 (general work-authorization language, not just India-specific).
+ *
+ * @param {{locationText?:string, jdText?:string}} input
+ * @returns {{tier: 'india-eligible'|'global-remote'|'restricted'|'unknown', confidence:number, evidence:string}}
+ */
+export function classifyGeoEligibility({ locationText = '', jdText = '' } = {}) {
+  const loc = String(locationText || '');
+  const jd = String(jdText || '');
+  const combined = `${loc} ${jd}`;
+
+  if (INDIA_PATTERN.test(combined) || INDIA_CODE_PATTERN.test(loc)) {
+    return { tier: 'india-eligible', confidence: 85, evidence: 'India explicitly listed in location/JD' };
+  }
+  if (WORK_AUTH_NEGATIVE_PATTERN.test(jd)) {
+    const m = jd.match(WORK_AUTH_NEGATIVE_PATTERN);
+    return { tier: 'restricted', confidence: 5, evidence: `explicit work-authorization restriction: "${m[0]}"` };
+  }
+  const otherCountryHit = OTHER_COUNTRY_PATTERN.test(loc) || WORKDAY_COUNTRY_CODE_PATTERN.test(loc);
+  if (GLOBAL_REMOTE_PATTERN.test(combined) && !otherCountryHit) {
+    return { tier: 'global-remote', confidence: 70, evidence: 'genuinely global/distributed remote, no country qualifier' };
+  }
+  if (otherCountryHit) {
+    const m = loc.match(OTHER_COUNTRY_PATTERN) || loc.match(WORKDAY_COUNTRY_CODE_PATTERN);
+    return { tier: 'restricted', confidence: 15, evidence: `location restricted to a non-India country/hub: "${m[0]}"` };
+  }
+  return { tier: 'unknown', confidence: 30, evidence: 'no geo signal found either way — silence is not proof of exclusion' };
+}
+
+// Below this confidence, a posting is treated as a geo near-gate match (see
+// filter-inbox-by-fit.mjs) — mirrors DOMAIN_FIT_GATE_THRESHOLD's existing
+// near-gate pattern (excluded from the ranked list, not silently discarded —
+// moved to a separate, inspectable bucket so the reason stays visible).
+export const GEO_GATE_CONFIDENCE_THRESHOLD = 20;
 
 const HIREABILITY_WEIGHTS = {
   indiaEntityEvidence: 55,
   eorPartnerMentioned: 45,
-  eligibleCountriesListsIndia: 60, // direct evidence, but rare
-  noEvidence: 30, // baseline when nothing is known either way — silence isn't proof of exclusion
 };
 
 const EOR_PROVIDER_NAMES = ['deel', 'remote.com', 'multiplier', 'papaya global', 'papaya', 'rippling', 'oyster', 'globalization partners', 'g-p'];
 
 /**
- * Weighted India-hireability confidence, 0-100. Never a hard binary — per the
- * resolved brainstorm direction, this feeds a blended rank, not a pass/fail
- * gate, because most postings carry no explicit evidence either way.
+ * Weighted India-hireability confidence, 0-100. Thin wrapper around
+ * classifyGeoEligibility() that keeps the existing 0-100 contract intact
+ * (india_hireability_confidence is read by analyze-patterns.mjs) while the
+ * real detection logic now lives in the taxonomy classifier above. Still
+ * never a hard binary for the BLENDED rank — the near-gate is applied
+ * separately, at the pipeline stage, not inside this scoring function.
  *
- * @param {{jdText?:string, companyHasIndiaEntity?:boolean, mentionsEOR?:boolean}} input
+ * @param {{jdText?:string, locationText?:string, companyHasIndiaEntity?:boolean, mentionsEOR?:boolean}} input
  */
-export function scoreIndiaHireability({ jdText = '', companyHasIndiaEntity = false, mentionsEOR = false } = {}) {
+export function scoreIndiaHireability({ jdText = '', locationText = '', companyHasIndiaEntity = false, mentionsEOR = false } = {}) {
   const text = String(jdText || '').toLowerCase();
   const explicitEorMention = mentionsEOR || EOR_PROVIDER_NAMES.some(name => text.includes(name));
-  const eligibleCountriesListsIndia = /eligible countries?[^.]*india|must be (?:located|based) in[^.]*india|open to candidates in[^.]*india/.test(text);
 
-  if (companyHasIndiaEntity) return clamp0to100(HIREABILITY_WEIGHTS.indiaEntityEvidence + (eligibleCountriesListsIndia ? 20 : 0));
-  if (eligibleCountriesListsIndia) return clamp0to100(HIREABILITY_WEIGHTS.eligibleCountriesListsIndia + (explicitEorMention ? 15 : 0));
+  const geo = classifyGeoEligibility({ locationText, jdText });
+  if (geo.tier === 'india-eligible') return clamp0to100(geo.confidence + (explicitEorMention ? 10 : 0));
+  if (geo.tier === 'restricted') return clamp0to100(geo.confidence); // real negative evidence — do NOT let entity/EOR evidence override an explicit restriction
+  if (companyHasIndiaEntity) return clamp0to100(HIREABILITY_WEIGHTS.indiaEntityEvidence);
   if (explicitEorMention) return clamp0to100(HIREABILITY_WEIGHTS.eorPartnerMentioned);
-  return HIREABILITY_WEIGHTS.noEvidence;
+  if (geo.tier === 'global-remote') return clamp0to100(geo.confidence);
+  return geo.confidence; // 'unknown' -> same 30 baseline as before, unchanged contract
 }
 
 // ── Domain fit (near-gate) ──────────────────────────────────────────────────
@@ -298,6 +398,7 @@ export function computeInboxRank({ domainFit, heat = null, layoffRisk = null }) 
  */
 export function scorePosting({
   jdText,
+  locationText = '',
   compAmount,
   compCurrency = 'USD',
   compKind = 'cash',
@@ -313,7 +414,8 @@ export function scorePosting({
     : null;
   const compEffectiveValueInr = effectiveValue && !effectiveValue.excluded ? effectiveValue.netInr : null;
 
-  const hireabilityConfidence = scoreIndiaHireability({ jdText: jdText || '', companyHasIndiaEntity: indiaEntity, mentionsEOR: mentionsEor });
+  const hireabilityConfidence = scoreIndiaHireability({ jdText: jdText || '', locationText, companyHasIndiaEntity: indiaEntity, mentionsEOR: mentionsEor });
+  const geoEligibility = classifyGeoEligibility({ locationText, jdText: jdText || '' });
 
   const heat = typeof companySignal?.heat === 'number' ? companySignal.heat : null;
   const layoffRisk = typeof companySignal?.layoff_risk === 'number' ? companySignal.layoff_risk : null;
@@ -338,6 +440,12 @@ export function scorePosting({
     domain_fit_score: domainFitScore,
     comp_effective_value_inr: compEffectiveValueInr,
     india_hireability_confidence: hireabilityConfidence,
+    // Real tier + human-readable evidence, not just the blended number — so
+    // a report/UI can show WHY (e.g. "restricted: USA - Remote"), not just a
+    // black-box confidence figure. Never influences score/fit_rank beyond
+    // what india_hireability_confidence already contributes.
+    geo_eligibility: geoEligibility.tier,
+    geo_evidence: geoEligibility.evidence,
     fit_rank: fitRank,
   };
 }
@@ -402,12 +510,48 @@ async function runSelfTest() {
   assert(total.netInr > 0, 'total nets cash + weighted public equity');
 
   // India-hireability: weighted, never binary.
-  assert(scoreIndiaHireability({}) === HIREABILITY_WEIGHTS.noEvidence, 'no evidence -> baseline confidence, not zero');
+  assert(scoreIndiaHireability({}) === 30, 'no evidence -> baseline confidence, not zero');
   assert(scoreIndiaHireability({ companyHasIndiaEntity: true }) > scoreIndiaHireability({ mentionsEOR: true }), 'India entity evidence outweighs EOR mention alone');
-  assert(scoreIndiaHireability({ jdText: 'We hire globally via Deel.' }) > HIREABILITY_WEIGHTS.noEvidence, 'EOR provider name in JD text is detected');
+  assert(scoreIndiaHireability({ jdText: 'We hire globally via Deel.' }) > 30, 'EOR provider name in JD text is detected');
   assert(
-    scoreIndiaHireability({ jdText: 'Open to candidates in the US, UK, and India.' }) > HIREABILITY_WEIGHTS.noEvidence,
+    scoreIndiaHireability({ jdText: 'Open to candidates in the US, UK, and India.' }) > 30,
     'eligible-countries-list mentioning India is detected'
+  );
+  // Real negative evidence must NOT be overridden by unrelated positive
+  // signals — an India entity doesn't make a US-citizens-only req viable.
+  assert(
+    scoreIndiaHireability({ jdText: 'Must be a US citizen due to federal contract requirements.', companyHasIndiaEntity: true }) < 30,
+    'explicit work-authorization restriction overrides an unrelated India-entity positive signal'
+  );
+
+  // ── classifyGeoEligibility: real taxonomy, grounded in this project's own
+  // scan-history.tsv values, not synthetic examples. ──
+  assert(classifyGeoEligibility({ locationText: 'Bengaluru, India' }).tier === 'india-eligible', 'real "Bengaluru, India" location -> india-eligible');
+  assert(classifyGeoEligibility({ locationText: 'IND-Pune EON Kharadi Infrastructure' }).tier === 'india-eligible', 'real Pune/IND office-code location -> india-eligible');
+  assert(classifyGeoEligibility({ locationText: 'Bangalore, IND; Hyderabad, IND; Mohali, IND; Pune, IND' }).tier === 'india-eligible', 'real multi-city IND-coded location -> india-eligible');
+  assert(classifyGeoEligibility({ locationText: 'Florida; Georgia; Indiana; New Jersey; New York, New York; Virginia' }).tier !== 'india-eligible', '"Indiana" (US state) must NOT false-positive as India (word-boundary regression test)');
+
+  assert(classifyGeoEligibility({ locationText: 'USA - Remote' }).tier === 'restricted', 'real "USA - Remote" location -> restricted, not treated as generically global');
+  assert(classifyGeoEligibility({ locationText: 'Canada - Remote AB' }).tier === 'restricted', 'real "Canada - Remote AB" location -> restricted');
+  assert(classifyGeoEligibility({ locationText: 'San Francisco, California' }).tier === 'restricted', 'a specific US city with no remote qualifier -> restricted, not unknown');
+
+  assert(classifyGeoEligibility({ locationText: 'Distributed' }).tier === 'global-remote', 'bare "Distributed" (no region qualifier) -> genuinely global-remote');
+  assert(classifyGeoEligibility({ locationText: 'Worldwide' }).tier === 'global-remote', '"Worldwide" -> global-remote');
+  assert(classifyGeoEligibility({ locationText: 'APAC - Distributed (Taiwan)' }).tier !== 'global-remote', 'region-QUALIFIED "distributed" (APAC/Taiwan) must NOT count as global -- real false-positive risk caught before shipping');
+  assert(classifyGeoEligibility({ locationText: 'US - Distributed' }).tier !== 'global-remote', 'region-qualified "US - Distributed" must NOT count as global either');
+
+  assert(classifyGeoEligibility({ locationText: 'Remote' }).tier === 'unknown', 'bare "Remote" with zero country info -> unknown, not assumed global or assumed restricted');
+  assert(classifyGeoEligibility({ locationText: 'SGP-Yishun' }).tier === 'restricted', 'real Workday 3-letter country code (SGP = Singapore, no spelled-out name) -> restricted, not unknown');
+  assert(classifyGeoEligibility({ locationText: 'IRL-Cork-Kavanagh House' }).tier === 'restricted', 'real Workday IRL code -> restricted');
+  assert(classifyGeoEligibility({ locationText: 'IND-Pune EON Kharadi Infrastructure' }).tier === 'india-eligible', 'IND code still wins over the Workday-country-code check (checked first)');
+
+  assert(
+    classifyGeoEligibility({ jdText: 'Must be a US citizen; active security clearance required.' }).tier === 'restricted',
+    'explicit work-authorization/clearance language in JD text -> restricted, even with no location field at all'
+  );
+  assert(
+    classifyGeoEligibility({ locationText: 'Remote', jdText: 'This position is not eligible for remote work outside the United States.' }).tier === 'restricted',
+    '"not eligible for remote work outside the US" JD language overrides an otherwise-ambiguous bare "Remote" location'
   );
 
   // Domain fit + gate.
@@ -455,6 +599,11 @@ async function runSelfTest() {
   assert(fullScore.comp_effective_value_inr !== null && fullScore.comp_effective_value_inr > 0, 'scorePosting: comp produces a real net-INR value');
   assert(typeof fullScore.india_hireability_confidence === 'number', 'scorePosting: hireability is always a number, never null (weighted baseline, not unknown-state)');
   assert(fullScore.fit_rank !== null && fullScore.fit_rank > 0, 'scorePosting: fit_rank computed when domain fit + comp are both present');
+
+  const usOnlyScore = scorePosting({ jdText: 'Great security role. Must be a US citizen; active security clearance required.', locationText: 'USA - Remote' });
+  assert(usOnlyScore.geo_eligibility === 'restricted', 'scorePosting: geo_eligibility surfaces the real taxonomy tier, not just a blended number');
+  assert(typeof usOnlyScore.geo_evidence === 'string' && usOnlyScore.geo_evidence.length > 0, 'scorePosting: geo_evidence is a real human-readable string, always present');
+  assert(usOnlyScore.india_hireability_confidence < 30, 'scorePosting: explicit US-only evidence drags india_hireability_confidence below the old silent baseline');
 
   // scorePosting(): comp missing -> comp_effective_value_inr and fit_rank are
   // null, but domain_fit_score/hireability still compute (partial degrade).
@@ -509,11 +658,12 @@ function parseArg(args, flag) {
 async function runScoreCli(args) {
   const company = parseArg(args, '--company');
   if (!company) {
-    console.error('Usage: node compute-fit.mjs --score --company "Name" [--jd-text "..." | --jd-text-file path] [--comp-amount N --comp-currency USD --comp-kind cash] [--india-entity] [--mentions-eor]');
+    console.error('Usage: node compute-fit.mjs --score --company "Name" [--jd-text "..." | --jd-text-file path] [--location-text "..."] [--comp-amount N --comp-currency USD --comp-kind cash] [--india-entity] [--mentions-eor]');
     process.exitCode = 1;
     return;
   }
 
+  const locationText = parseArg(args, '--location-text') ?? '';
   let jdText = parseArg(args, '--jd-text');
   const jdTextFile = parseArg(args, '--jd-text-file');
   if (!jdText && jdTextFile) {
@@ -536,7 +686,7 @@ async function runScoreCli(args) {
   const fxRatesToInr = compAmount !== undefined ? await fetchFxRatesToInr() : FALLBACK_FX_TO_INR;
   const companySignal = readCompanySignal(company);
 
-  const result = scorePosting({ jdText, compAmount, compCurrency, compKind, indiaEntity, mentionsEor, fxRatesToInr, companySignal });
+  const result = scorePosting({ jdText, locationText, compAmount, compCurrency, compKind, indiaEntity, mentionsEor, fxRatesToInr, companySignal });
   console.log(JSON.stringify(result, null, 2));
 }
 

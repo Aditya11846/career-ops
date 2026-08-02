@@ -71,6 +71,21 @@ On contradiction, add exactly one flag line at the top of Block B in the report,
 
 The flag is an additive line only — Block B's existing content stays unchanged below it, and no flag line appears when there is no contradiction.
 
+### Geo-restriction check (2026-08-02)
+
+A separate axis from the geo-mismatch check above — that one catches "remote" contradicted by an attendance requirement; this one catches "remote" that's real but secretly scoped to one country, which is common enough that it's likely cost real search time before this check existed. The candidate is remote-only, based in India (see `config/profile.yml` → `location`; hybrid based in Pune is separately acceptable, see that file's note).
+
+While reading the JD, actively look for (this is a careful read, not a keyword scan — `compute-fit.mjs`'s `geo_evidence` field is a fast approximation, not a substitute):
+- Explicit citizenship/work-authorization requirements: "must be a US citizen," "authorized to work in [country] without sponsorship," "not eligible for visa sponsorship."
+- A security-clearance requirement (active or eligible-for) — near-guaranteed single-country restriction on its own.
+- A "remote" claim that turns out to be scoped once you read past the headline: "Remote (US only)," "Remote — must reside in [country/region]," a specific-country benefits/payroll section with no mention of international hiring.
+
+On finding real evidence, add exactly one flag line at the top of Block B (alongside the geo-mismatch flag if both fire — do not merge them into one line), quoting the evidence **verbatim**:
+
+`⚠️ **Geo-restriction:** {verbatim JD line or location-field text showing the restriction}`
+
+Cross-check against `compute-fit.mjs --score`'s `geo_eligibility`/`geo_evidence` fields (already computed for the Machine Summary — see `batch/batch-prompt.md`) — if the CLI already caught it, your flag can reuse that evidence rather than re-deriving it; if your read finds something the CLI missed, use what you found. Never flag on silence (no location/citizenship language at all is not evidence of restriction) and never flag a genuinely global-remote or explicitly India-eligible posting.
+
 ## Block B — Match with CV
 
 Read `cv.md`. Create a table with each JD requirement mapped to exact lines in the CV.
