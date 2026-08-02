@@ -45,7 +45,18 @@ function read(rel: string): string | null {
   }
 }
 
-export type InboxJob = { url: string; company: string; role: string; location?: string; compensation?: string; done: boolean; postedAt?: string; fitRank?: number | null };
+export type InboxJob = {
+  url: string;
+  company: string;
+  role: string;
+  location?: string;
+  compensation?: string;
+  done: boolean;
+  postedAt?: string;
+  fitRank?: number | null;
+  geoEligibility?: "india-eligible" | "global-remote" | "restricted" | "unknown" | null;
+  geoEvidence?: string | null;
+};
 
 /** Parse data/pipeline.md — `- [ ] URL | Company | Role [| Location [| Compensation]]`.
  *  Positional split (NOT a greedy trailing group): the optional 4th `location`
@@ -78,24 +89,34 @@ export function readInbox(): InboxJob[] {
   return jobs;
 }
 
+export type PostingSignal = {
+  rank: number | null;
+  geoEligibility: InboxJob["geoEligibility"];
+  geoEvidence: string | null;
+};
+
 /**
- * Read data/posting-signals.json -> Map<url, fitRank>, written by
+ * Read data/posting-signals.json -> Map<url, PostingSignal>, written by
  * score-inbox.mjs. Same tolerant-missing-file contract as readScanDates():
  * no file -> empty map, a malformed record is skipped, never thrown.
  */
-export function readPostingSignals(): Map<string, number | null> {
+export function readPostingSignals(): Map<string, PostingSignal> {
   const raw = read("data/posting-signals.json");
-  const ranks = new Map<string, number | null>();
-  if (!raw) return ranks;
+  const signals = new Map<string, PostingSignal>();
+  if (!raw) return signals;
   try {
-    const parsed = JSON.parse(raw) as Record<string, { rank?: number | null }>;
+    const parsed = JSON.parse(raw) as Record<string, { rank?: number | null; geoEligibility?: string; geoEvidence?: string }>;
     for (const [url, record] of Object.entries(parsed)) {
-      ranks.set(url, typeof record?.rank === "number" ? record.rank : null);
+      signals.set(url, {
+        rank: typeof record?.rank === "number" ? record.rank : null,
+        geoEligibility: (record?.geoEligibility as InboxJob["geoEligibility"]) ?? null,
+        geoEvidence: record?.geoEvidence ?? null,
+      });
     }
   } catch {
     // malformed file -- treat as empty, never throw
   }
-  return ranks;
+  return signals;
 }
 
 /**
@@ -215,7 +236,16 @@ export function pipelineSummary(): PipelineSummary {
     // join the freshness date (first_seen) and the cheap fit rank (from
     // score-inbox.mjs) onto each raw posting — the inbox's triage view
     // orders/faceted-filters on both entirely client-side.
-    inbox: readInbox().map((j) => ({ ...j, postedAt: scanDates.get(j.url), fitRank: postingSignals.get(j.url) ?? null })),
+    inbox: readInbox().map((j) => {
+      const signal = postingSignals.get(j.url);
+      return {
+        ...j,
+        postedAt: scanDates.get(j.url),
+        fitRank: signal?.rank ?? null,
+        geoEligibility: signal?.geoEligibility ?? null,
+        geoEvidence: signal?.geoEvidence ?? null,
+      };
+    }),
     applications: readApplications(),
   };
 }

@@ -24,7 +24,7 @@ import { readFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
-import { scoreDomainFit, computeInboxRank } from './compute-fit.mjs';
+import { scoreDomainFit, computeInboxRank, classifyGeoEligibility } from './compute-fit.mjs';
 import { readCompanySignal } from './signal-agent/compute-heat.mjs';
 import { writeFileAtomic } from './tracker-utils.mjs';
 
@@ -100,7 +100,16 @@ function main() {
     const heat = typeof signal?.heat === 'number' ? signal.heat : null;
     const layoffRisk = typeof signal?.layoff_risk === 'number' ? signal.layoff_risk : null;
     const { rank } = computeInboxRank({ domainFit, heat, layoffRisk });
-    results[entry.url] = { company: entry.company, role: entry.role, domainFit, rank, updatedAt: new Date().toISOString() };
+    const geo = classifyGeoEligibility({ locationText: entry.location || '' });
+    results[entry.url] = {
+      company: entry.company,
+      role: entry.role,
+      domainFit,
+      rank,
+      geoEligibility: geo.tier,
+      geoEvidence: geo.evidence,
+      updatedAt: new Date().toISOString(),
+    };
   }
 
   const ranked = Object.entries(results).sort((a, b) => b[1].rank - a[1].rank);

@@ -86,6 +86,27 @@ export function TriageRow({
           ) : (
             !evaluated && <span className="italic text-muted">not scored</span>
           )}
+          {/* Geo-eligibility (compute-fit.mjs classifyGeoEligibility, 2026-08-02)
+              — only shown when it carries real information (india-eligible /
+              global-remote positive signal, or restricted if one somehow
+              slipped past filter-inbox-by-fit.mjs's near-gate). "unknown" (no
+              evidence either way) is the common case and isn't worth a badge
+              on every row. */}
+          {job.geoEligibility === "india-eligible" && (
+            <span className="rounded bg-emerald-500/15 px-1 py-px font-medium text-emerald-700 dark:text-emerald-400" title={job.geoEvidence ?? undefined}>
+              🌍 India-eligible
+            </span>
+          )}
+          {job.geoEligibility === "global-remote" && (
+            <span className="rounded bg-sky-500/15 px-1 py-px font-medium text-sky-700 dark:text-sky-400" title={job.geoEvidence ?? undefined}>
+              🌍 global remote
+            </span>
+          )}
+          {job.geoEligibility === "restricted" && (
+            <span className="rounded bg-red-500/15 px-1 py-px font-medium text-red-700 dark:text-red-400" title={job.geoEvidence ?? undefined}>
+              🌍 geo-restricted
+            </span>
+          )}
         </p>
       </div>
 
