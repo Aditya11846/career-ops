@@ -1,11 +1,21 @@
 // @ts-check
 /** @typedef {import('./_types.js').Provider} Provider */
 
+import { decodeEntities } from './_html-entities.mjs';
+
 // Hacker News "Ask HN: Who is hiring?" provider — no auth required.
 //
 // Algorithm:
-//   1. Find the current monthly hiring thread via the Algolia HN search API
-//      (search_by_date, tags=story, query="Ask HN Who is hiring").
+//   1. Find the current monthly hiring thread via the Algolia HN search API,
+//      scoped to the `whoishiring` bot account that posts it every month
+//      (tags=story,author_whoishiring) rather than a free-text query.
+//      CONFIRMED LIVE (2026-08-03): a free-text query="Ask HN Who is hiring"
+//      does NOT reliably surface the real thread in its top 5 results —
+//      Algolia's relevance ranking mixes in similarly-worded but unrelated
+//      threads ("Who is dating?", "Who wants to be hired?" meta-discussion,
+//      etc.), and the real monthly thread got crowded out entirely in a real
+//      test. Scoping to the canonical posting account is exact, not fuzzy —
+//      confirmed 506 real hits for that author, all genuine monthly threads.
 //   2. Fetch the thread's item from the Algolia items API; top-level `children`
 //      are individual job posts left as top-level comments.
 //   3. Parse each comment: the first non-empty line is treated as the title/header
@@ -17,7 +27,7 @@
 // Wire in via a `job_boards:` entry with `provider: hackernews`.
 
 const SEARCH_URL =
-  'https://hn.algolia.com/api/v1/search_by_date?tags=story&query=Ask%20HN%20Who%20is%20hiring&hitsPerPage=5';
+  'https://hn.algolia.com/api/v1/search_by_date?tags=story,author_whoishiring&hitsPerPage=10';
 
 /** @param {string} id */
 function itemUrl(id) {
@@ -33,18 +43,15 @@ function extractUrl(text) {
   return m ? m[0].replace(/[.,;!?)]+$/, '') : '';
 }
 
-// Named HTML entities we decode in comment bodies. Kept in single map
-/** @type {Record<string, string>} */
-const ENTITY_MAP = {
-  '&amp;': '&',
-  '&lt;': '<',
-  '&gt;': '>',
-  '&quot;': '"',
-  '&#x27;': "'",
-  '&#39;': "'",
-  '&nbsp;': ' ',
-};
-const ENTITY_RE = /&amp;|&lt;|&gt;|&quot;|&#x27;|&#39;|&nbsp;/g;
+// Entity decoding delegated to the shared providers/_html-entities.mjs
+// decoder (handles named entities AND numeric/hex entities generically) --
+// this file's own inline ENTITY_MAP only covered 7 hardcoded entities and
+// silently left others (e.g. &#x2F; for "/") undecoded, which showed up as
+// literal "&#x2F;" noise throughout every URL and location field in real
+// output (confirmed live 2026-08-03). Same drift-risk pattern _html-entities.mjs's
+// own header warns about (deutschebahn.mjs/hecklerkoch.mjs had duplicated,
+// diverging copies before being centralized) -- reuse it here instead of
+// growing a second incomplete copy.
 
 /**
  * Parse a single HN comment text into a normalized job object.
@@ -66,11 +73,11 @@ export function parseHnComment(text, threadUrl = '') {
   // Strip HTML. Anchors: keep the href value in place so URL extraction works.
   // Block-level tags (<p>, <br>, <div>, <li>, headings) become newlines so that
   // body paragraphs never bleed into the first header line after the join.
-  const plain = text
+  const stripped = text
     .replace(/<a\s[^>]*href="([^"]+)"[^>]*>.*?<\/a>/gi, (_, href) => href)
     .replace(/<\/?(?:p|br|div|li|h[1-6])\b[^>]*>/gi, '\n')
-    .replace(/<[^>]+>/g, ' ')
-    .replace(ENTITY_RE, (m) => ENTITY_MAP[m])
+    .replace(/<[^>]+>/g, ' ');
+  const plain = decodeEntities(stripped)
     .replace(/\r\n/g, '\n')
     .replace(/\r/g, '\n');
 
@@ -155,6 +162,17 @@ export default {
     if (!Array.isArray(children)) return [];
 
     // Step 3: Parse each comment.
+    // REAL BUG FOUND + FIXED LIVE (2026-08-03): passing the shared threadHnUrl
+    // as every comment's URL fallback caused mass silent dedup -- most "who is
+    // hiring" comments have no embedded URL at all (perfectly normal; they just
+    // describe the role and expect a thread reply), so nearly all of them
+    // collapsed onto the SAME fallback URL, and scan.mjs's URL-based dedup
+    // reduced ~270 real distinct postings down to 1. Confirmed live: a raw
+    // parse of the first 20 comments in a real thread produced 20 unique
+    // results when each got its OWN comment permalink as the fallback, vs.
+    // effectively 1 when they shared the thread URL. Each comment's own
+    // permalink is also more correct on its own merits -- it links directly to
+    // the specific posting, not the whole 276-comment thread.
     const jobs = [];
     for (const child of children) {
       // Skip deleted / dead / empty comments.
@@ -162,7 +180,8 @@ export default {
       const text = typeof child.text === 'string' ? child.text : '';
       if (!text.trim()) continue;
 
-      const parsed = parseHnComment(text, threadHnUrl);
+      const commentUrl = child.id ? `https://news.ycombinator.com/item?id=${child.id}` : threadHnUrl;
+      const parsed = parseHnComment(text, commentUrl);
       if (!parsed) continue;
 
       jobs.push({

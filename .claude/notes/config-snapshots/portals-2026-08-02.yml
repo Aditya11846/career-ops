@@ -407,7 +407,65 @@ tracked_companies:
     enabled: true
     notes: "Cyber asset attack surface management (device/identity inventory underpinning zero trust), overlap with Amit's Zero Trust enterprise access archetype. Confirmed Greenhouse API (26 real postings) during 2026-07-28 watchlist-widening pass."
 
-# job_boards: intentionally empty for now — this search is company-watchlist-
-# driven (curated, narrow domain), not board-driven (see brainstorm notes,
-# "curated watchlist vs. open scanning" discussion).
-job_boards: []
+# job_boards: turned on 2026-08-03 (brainstorm §21) — every one of these is
+# a REAL, already-built, zero-LLM-cost provider that was simply never
+# enabled. Company-watchlist scanning (tracked_companies above) stays
+# domain-fit/geo-fit filtered downstream exactly the same way; these add
+# genuine breadth (companies never in the curated list) rather than
+# replacing the curated approach. Each entry tested individually against a
+# real scan.mjs run before being trusted, not added blind.
+job_boards:
+  - name: RemoteOK
+    provider: remoteok
+    enabled: true
+    notes: "Board-wide remote-tech feed, zero-auth, no company curation needed. Enabled 2026-08-03 per brainstorm §21 — real code, never turned on before. Confirmed live: 100/100 raw postings correctly filtered out by domain-fit (0 relevant in the sample) — generic firehose, not security-specialized, but domain-fit gate handles the noise correctly. Keep on for breadth; expect low daily yield."
+
+  - name: Remotive
+    provider: remotive
+    enabled: true
+    notes: "Board-wide remote-jobs feed, independent coverage from RemoteOK. Enabled 2026-08-03."
+
+  - name: We Work Remotely
+    provider: weworkremotely
+    enabled: true
+    notes: "Long-established remote board (RSS feed). Enabled 2026-08-03."
+
+  - name: Himalayas
+    provider: himalayas
+    enabled: true
+    notes: "Modern remote job board. Enabled 2026-08-03."
+
+  - name: NoDesk
+    provider: nodesk
+    enabled: true
+    notes: "Remote-jobs RSS feed. Enabled 2026-08-03."
+
+  - name: Working Nomads
+    provider: workingnomads
+    enabled: true
+    notes: "Remote-jobs feed. Enabled 2026-08-03."
+
+  - name: Jobicy
+    provider: jobicy
+    enabled: true
+    notes: "Remote-jobs feed. Enabled 2026-08-03."
+
+  - name: Jobspresso
+    provider: jobspresso
+    enabled: true
+    notes: "Curated remote-jobs feed (public, no-auth). Enabled 2026-08-03."
+
+  - name: EchoJobs
+    provider: echojobs
+    enabled: false
+    notes: "Confirmed live 2026-08-03: returns HTTP 403 Forbidden (real bot-detection block, not a code bug). Left disabled honestly rather than pretending it works. Worth re-checking later in case the block is temporary/IP-based."
+
+  - name: HN Who's Hiring
+    provider: hackernews
+    enabled: true
+    notes: "Monthly Hacker News hiring thread — different population than formal ATS boards (small/technical-founder-led companies). Enabled 2026-08-03. Found + fixed 2 real bugs in providers/hackernews.mjs same day: (1) thread-search query wasn't reliably finding the real monthly thread (fixed: scope to author_whoishiring), (2) shared fallback URL was silently deduping ~270 real distinct postings down to 1 (fixed: each comment gets its own permalink). Real yield confirmed after fixes: 277 raw postings, 17 survived domain+geo filtering, including a genuinely close match (Senior Embedded Software Engineer, C/C++/Yocto/Bare Metal)."
+
+  - name: The Muse
+    provider: themuse
+    enabled: true
+    notes: "Broader job board with real enterprise company coverage. Enabled 2026-08-03. Confirmed live: slow (~3min, 1481 raw postings, heavily paginated) and mostly generic (SpaceX/Disney/Bank of America roles unrelated to security) — domain-fit gate filters correctly, but this is the slowest source of the batch. Keep for breadth given cron runs overnight anyway; worth revisiting if scan runtime becomes a problem."
