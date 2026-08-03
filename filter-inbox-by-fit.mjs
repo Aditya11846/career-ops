@@ -38,6 +38,7 @@ import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
 import { scoreDomainFit, classifyGeoEligibility, GEO_GATE_CONFIDENCE_THRESHOLD } from './compute-fit.mjs';
+import { checkLivenessViaApi, checkLivenessViaFetch } from './liveness-api.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const PIPELINE_PATH = join(ROOT, 'data/pipeline.md');
@@ -49,6 +50,19 @@ const FILTERED_PATH = join(ROOT, 'data/pipeline-filtered.md');
 // nothing to fix, it's just not viable), so they stay in separate files
 // rather than one undifferentiated "filtered" bucket.
 const GEO_FILTERED_PATH = join(ROOT, 'data/pipeline-geo-filtered.md');
+// A third, separate failure mode from domain-fit and geo-fit: the posting
+// itself is gone (404/410, or a hard "no longer available" body pattern).
+// Confirmed live 2026-08-03 — a Cox Automotive posting scanned in from The
+// Muse's API one day was already 404 the next; it still passed domain+geo
+// fit and got ranked/badged as a top pick, so the evaluate connector burned
+// a real evaluate-job discovering it was dead (the agent correctly refused
+// to fabricate a score, per AGENTS.md's liveness gate, but the token spend
+// was still wasted). Checked here, at scan-triage time, for free/cheap —
+// see checkLivenessViaApi/checkLivenessViaFetch in liveness-api.mjs.
+const DEAD_FILTERED_PATH = join(ROOT, 'data/pipeline-dead-filtered.md');
+// How many liveness checks to run concurrently. Bounded so a large Pending
+// section doesn't fire 200+ simultaneous outbound requests at once.
+const LIVENESS_CONCURRENCY = 8;
 
 // compute-fit.mjs's DOMAIN_FIT_GATE_THRESHOLD (20) is calibrated for full JD
 // paragraph text at evaluation time, where several keyword phrases can appear
@@ -91,6 +105,22 @@ manually if it was filtered by mistake (e.g. a company confirmed elsewhere to
 hire via an EOR).
 
 ## Geo-filtered
+
+`;
+
+const DEAD_FILTERED_SKELETON = `# Pipeline — Filtered (dead posting)
+
+Entries moved here by filter-inbox-by-fit.mjs — a liveness check (ATS API,
+or a plain fetch for non-ATS aggregator mirrors) got a definitive HTTP
+404/410 or matched a hard "no longer available" body pattern. See
+checkLivenessViaApi/checkLivenessViaFetch in liveness-api.mjs. Conservative
+by design: anything ambiguous (network error, redirect, bot-challenge,
+403/503, unrecognized shape) stays in data/pipeline.md rather than risk
+dropping a real posting. Nothing here is deleted; move an entry back into
+data/pipeline.md's "## Pending" section manually if it was filtered by
+mistake (the source may have come back, or relisted under the same URL).
+
+## Dead
 
 `;
 
@@ -137,7 +167,38 @@ function loadExistingUrlsFrom(path) {
   return urls;
 }
 
-function main() {
+/**
+ * Free ATS API rung first, plain-fetch fallback second (see liveness-api.mjs).
+ * Both rungs are conservative: anything but a definitive 'expired' verdict
+ * (network error, 'active', 'uncertain') means "keep it".
+ * @param {string} url
+ * @returns {Promise<{ result: string, code: string, reason: string } | null>}
+ */
+async function checkPostingLiveness(url) {
+  const viaApi = await checkLivenessViaApi(url).catch(() => null);
+  if (viaApi) return viaApi;
+  return checkLivenessViaFetch(url).catch(() => null);
+}
+
+/**
+ * Runs `checkPostingLiveness` over `entries` with at most `limit` in flight at
+ * once. Returns entries in the same order, annotated with `.liveness`.
+ */
+async function checkLivenessBatch(entries, limit) {
+  const results = new Array(entries.length);
+  let next = 0;
+  async function worker() {
+    for (;;) {
+      const i = next++;
+      if (i >= entries.length) return;
+      results[i] = { ...entries[i], liveness: await checkPostingLiveness(entries[i].parsed.url) };
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, entries.length) }, worker));
+  return results;
+}
+
+async function main() {
   const args = process.argv.slice(2);
   const dryRun = args.includes('--dry-run');
   const summaryOnly = args.includes('--summary');
@@ -157,6 +218,10 @@ function main() {
 
   const alreadyDomainFiltered = loadExistingUrlsFrom(FILTERED_PATH);
   const alreadyGeoFiltered = loadExistingUrlsFrom(GEO_FILTERED_PATH);
+  const alreadyDeadFiltered = loadExistingUrlsFrom(DEAD_FILTERED_PATH);
+  // `kept` holds passthrough content in original order — blank lines untouched,
+  // and postings that passed domain+geo fit as { line, parsed } so the liveness
+  // pass below can check and drop the dead ones without disturbing order.
   const kept = [];
   const movedDomain = [];
   const movedGeo = [];
@@ -168,7 +233,7 @@ function main() {
       kept.push(line); // blank lines / non-checkbox content pass through untouched
       continue;
     }
-    if (alreadyDomainFiltered.has(parsed.url) || alreadyGeoFiltered.has(parsed.url)) {
+    if (alreadyDomainFiltered.has(parsed.url) || alreadyGeoFiltered.has(parsed.url) || alreadyDeadFiltered.has(parsed.url)) {
       // Already moved in a prior run — idempotent no-op, drop from pending
       // without re-scoring or duplicating into a filtered file again.
       continue;
@@ -187,12 +252,28 @@ function main() {
       movedGeo.push({ ...parsed, geoEvidence: geo.evidence });
       continue;
     }
-    kept.push(line);
+    kept.push({ line, parsed });
   }
 
+  // Liveness pass — domain+geo already passed, so every candidate here is a
+  // real network check. Re-checked every run (not deduped against a "seen"
+  // set) because a posting that was alive last scan can die between runs —
+  // that's the exact gap this closes (see DEAD_FILTERED_PATH comment above).
+  const candidates = kept.filter((k) => typeof k === 'object');
+  const liveChecked = summaryOnly ? [] : await checkLivenessBatch(candidates, LIVENESS_CONCURRENCY);
+  const deadUrls = new Set(liveChecked.filter((c) => c.liveness?.result === 'expired').map((c) => c.parsed.url));
+  const movedDead = liveChecked
+    .filter((c) => deadUrls.has(c.parsed.url))
+    .map((c) => ({ ...c.parsed, deadReason: c.liveness.reason }));
+
+  const finalKept = kept.map((k) => (typeof k === 'string' ? k : k.line)).filter((line) => {
+    const parsed = parseCheckboxLine(line);
+    return !parsed || !deadUrls.has(parsed.url);
+  });
+
   if (summaryOnly) {
-    const stillPending = bounds.end - bounds.start - 1 - movedDomain.length - movedGeo.length - alreadyDomainFiltered.size - alreadyGeoFiltered.size;
-    console.log(`Pending: ${Math.max(0, stillPending)} kept, ${movedDomain.length} newly domain-filtered, ${movedGeo.length} newly geo-filtered.`);
+    const stillPending = bounds.end - bounds.start - 1 - movedDomain.length - movedGeo.length - alreadyDomainFiltered.size - alreadyGeoFiltered.size - alreadyDeadFiltered.size;
+    console.log(`Pending: ${Math.max(0, stillPending)} kept, ${movedDomain.length} newly domain-filtered, ${movedGeo.length} newly geo-filtered. (liveness check skipped in --summary mode)`);
     return;
   }
 
@@ -204,20 +285,24 @@ function main() {
   for (const m of movedGeo) {
     console.log(`  - ${m.company} | ${m.role} (${m.geoEvidence}) → geo-filtered`);
   }
-  console.log(`${kept.filter(l => parseCheckboxLine(l)).length} stay in data/pipeline.md.`);
+  console.log(`Liveness filter: ${movedDead.length} moved to data/pipeline-dead-filtered.md.`);
+  for (const m of movedDead) {
+    console.log(`  - ${m.company} | ${m.role} (${m.deadReason}) → dead`);
+  }
+  console.log(`${finalKept.filter(l => parseCheckboxLine(l)).length} stay in data/pipeline.md.`);
 
   if (dryRun) {
     console.log('\n(dry run — no files written)');
     return;
   }
 
-  if (movedDomain.length === 0 && movedGeo.length === 0) {
+  if (movedDomain.length === 0 && movedGeo.length === 0 && movedDead.length === 0) {
     console.log('Nothing to move.');
     return;
   }
 
   // Rewrite data/pipeline.md's Pending section with only the kept lines.
-  const newLines = [...lines.slice(0, bounds.start + 1), ...kept, ...lines.slice(bounds.end)];
+  const newLines = [...lines.slice(0, bounds.start + 1), ...finalKept, ...lines.slice(bounds.end)];
   writeFileSync(PIPELINE_PATH, newLines.join('\n'), 'utf-8');
 
   if (movedDomain.length > 0) {
@@ -236,7 +321,18 @@ function main() {
     writeFileSync(GEO_FILTERED_PATH, readFileSync(GEO_FILTERED_PATH, 'utf-8') + geoLines, 'utf-8');
   }
 
-  console.log(`\nWrote changes to data/pipeline.md, data/pipeline-filtered.md, and data/pipeline-geo-filtered.md.`);
+  if (movedDead.length > 0) {
+    if (!existsSync(DEAD_FILTERED_PATH)) writeFileSync(DEAD_FILTERED_PATH, DEAD_FILTERED_SKELETON, 'utf-8');
+    const deadLines = movedDead
+      .map(m => `- [ ] ${m.url} | ${m.company} | ${m.role}${m.location ? ` | ${m.location}` : ''} (${m.deadReason})`)
+      .join('\n') + '\n';
+    writeFileSync(DEAD_FILTERED_PATH, readFileSync(DEAD_FILTERED_PATH, 'utf-8') + deadLines, 'utf-8');
+  }
+
+  console.log(`\nWrote changes to data/pipeline.md, data/pipeline-filtered.md, data/pipeline-geo-filtered.md, and data/pipeline-dead-filtered.md.`);
 }
 
-main();
+main().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});

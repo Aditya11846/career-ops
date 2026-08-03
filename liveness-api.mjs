@@ -27,6 +27,8 @@
  * (no slashes / traversal), and server-side redirects are refused.
  */
 
+import { classifyLiveness } from './liveness-core.mjs';
+
 const TIMEOUT_MS = 8_000;
 // Strict path-segment charset. Anything with a slash, dot-dot, or other char is
 // rejected before it can reach the fixed-host API URL template.
@@ -226,6 +228,61 @@ export async function checkLivenessViaApi(url) {
     return null; // 429/5xx/other → inconclusive, fall back to the browser check
   } catch {
     return null; // interpret abort / unexpected error → inconclusive
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Third, cheaper-than-Playwright liveness rung for postings that aren't a known
+ * ATS URL (job-board aggregator mirrors — The Muse, RemoteOK, Remotive, etc. —
+ * that resolveAtsApi doesn't recognize). Plain fetch, no JS execution: gets the
+ * HTTP status and raw HTML, then hands off to liveness-core.mjs's
+ * classifyLiveness() — the SAME pure classifier the Playwright rung uses, just
+ * fed static markup instead of a rendered DOM. `applyControls` is always empty
+ * here (no DOM to query), so a live posting can only ever come back 'uncertain'
+ * (never falsely 'expired' — classifyLiveness's apply-control branch is the only
+ * path to a confident 'active', and skipping it just forgoes that confidence,
+ * it doesn't invert the verdict). A definitive HTTP 404/410, a hard "no longer
+ * available" body pattern, or a listing/search-page redirect are still real
+ * signal from static HTML on server-rendered aggregator pages (confirmed live
+ * 2026-08-03 against a themuse.com posting that returned a plain 404).
+ * @param {string} url
+ * @param {{ timeoutMs?: number }} [opts]
+ * @returns {Promise<{ result: 'active' | 'expired' | 'uncertain', code: string, reason: string } | null>}
+ *   null = network/timeout error → caller treats as inconclusive (keep the posting).
+ */
+export async function checkLivenessViaFetch(url, { timeoutMs = TIMEOUT_MS } = {}) {
+  let requestedUrl;
+  try {
+    requestedUrl = new URL(url);
+  } catch {
+    return null;
+  }
+  if (requestedUrl.protocol !== 'https:' && requestedUrl.protocol !== 'http:') return null;
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    let res;
+    try {
+      res = await fetch(url, {
+        method: 'GET',
+        headers: { 'user-agent': 'career-ops-liveness/1.0', accept: 'text/html' },
+        redirect: 'follow', // aggregator mirrors legitimately 301 to their own canonical URL
+        signal: controller.signal,
+      });
+    } catch {
+      return null; // network / timeout → inconclusive
+    }
+    const bodyText = await res.text().catch(() => '');
+    return classifyLiveness({
+      status: res.status,
+      requestedUrl: url,
+      finalUrl: res.url || url,
+      bodyText,
+      applyControls: [],
+    });
   } finally {
     clearTimeout(timer);
   }

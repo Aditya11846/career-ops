@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Bookmark, BookmarkCheck, Loader2, X } from "lucide-react";
+import { Bookmark, BookmarkCheck, Loader2, X, Trophy } from "lucide-react";
 import type { InboxJob } from "@/lib/career-ops";
 import type { AtsSource } from "@/lib/explore";
 import { ATS_LABEL } from "@/lib/explore";
@@ -30,6 +30,7 @@ export function TriageRow({
   scored,
   selected,
   shortlisted,
+  isTopPick,
   onToggleSelect,
   onSave,
   onSkip,
@@ -40,6 +41,7 @@ export function TriageRow({
   scored?: RowScore;
   selected: boolean;
   shortlisted: boolean;
+  isTopPick?: boolean;
   onToggleSelect: () => void;
   onSave: () => void;
   onSkip: () => void;
@@ -75,6 +77,16 @@ export function TriageRow({
           {job.location && <span className="truncate">{job.location}</span>}
           {source && <span className="rounded bg-surface-hover px-1 py-px font-medium text-muted">{ATS_LABEL[source]}</span>}
           {ago && <span>{ago}</span>}
+          {/* Top-pick badge (2026-08-03 brainstorm §22): the ranked-list ->
+              evaluate connection was found to be broken in practice — every
+              real evaluation done so far was a disconnected manual pick,
+              never the pipeline's own top-ranked posting. Makes the
+              connection visually obvious rather than relying on habit. */}
+          {isTopPick && !evaluated && (
+            <span className="inline-flex items-center gap-1 rounded bg-amber-500/15 px-1 py-px font-medium text-amber-700 dark:text-amber-400" title="Top-ranked, not yet evaluated — this is what the pipeline itself picked as best">
+              <Trophy className="size-3" /> top pick
+            </span>
+          )}
           {/* Cheap inbox-time fit rank (score-inbox.mjs) — domain fit +
               company stability only, distinct from the token-spending
               EVALUADA score on the right. Never fabricated: absent when the

@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Undo2 } from "lucide-react";
+import { Undo2, Trophy } from "lucide-react";
+import { CostBadge } from "@/components/cost/cost-badge";
 import { useJobs } from "@/components/jobs/job-store";
 import type { InboxJob } from "@/lib/career-ops";
 import type { AtsSource } from "@/lib/explore";
@@ -142,6 +143,30 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
   const visible = capped ? ordered.slice(0, BATCH) : ordered;
   const hiddenCount = hidden.length;
 
+  // Top picks (2026-08-03 brainstorm §22): the top 3 ranked-but-not-yet-
+  // evaluated postings, computed from `ordered` (already fit-rank-sorted) so
+  // this is always the pipeline's OWN top choices, never a facet-filtered
+  // subset — the whole point is connecting the real ranking to evaluation,
+  // not whatever's currently visible under active filters.
+  const topPickUrls = useMemo(() => {
+    const set = new Set<string>();
+    for (const e of ordered) {
+      if (set.size >= 3) break;
+      const s = scoreByUrl.get(e.job.url);
+      const alreadyEvaluated = !!s && (s.running || s.score != null);
+      if (!alreadyEvaluated) set.add(e.job.url);
+    }
+    return set;
+  }, [ordered, scoreByUrl]);
+
+  const evaluateTopPicks = () => {
+    const batchId = `top-picks-${Date.now()}`;
+    for (const e of ordered) {
+      if (!topPickUrls.has(e.job.url)) continue;
+      startJob({ title: `Score · ${e.job.company}`, subtitle: e.job.role, kind: "evaluate", input: e.job.url, page: "/pipeline", batchId });
+    }
+  };
+
   const isShortlisted = (url: string) => shortlist.some((s) => s.url === url);
 
   const save = (job: InboxJob) => {
@@ -209,6 +234,21 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
         onClear={() => { setWithin(null); setSources(new Set()); setSeniorities(new Set()); setLocQ(""); setKw(""); }}
       />
 
+      {/* Evaluate top picks (2026-08-03 brainstorm §22) — closes the gap
+          found live: every real evaluation done before this existed was a
+          disconnected manual pick, never the pipeline's own top-ranked
+          posting. One click evaluates the actual top 3, no shortlisting
+          required first. */}
+      {topPickUrls.size > 0 && (
+        <button
+          type="button"
+          onClick={evaluateTopPicks}
+          className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 py-2.5 text-sm font-medium text-amber-700 transition-colors hover:bg-amber-500/15 dark:text-amber-400 max-sm:min-h-[44px]"
+        >
+          <Trophy className="size-4" /> Evaluate top {topPickUrls.size} pick{topPickUrls.size === 1 ? "" : "s"} <CostBadge kind="spend" size="xs" />
+        </button>
+      )}
+
       {/* batch header: fresh slice by default, or the full filtered set */}
       <div className="mt-4 flex items-baseline justify-between gap-3">
         <p className="text-sm font-medium text-foreground">
@@ -245,6 +285,7 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
               scored={scoreByUrl.get(e.job.url)}
               selected={selected.has(e.job.url)}
               shortlisted={isShortlisted(e.job.url)}
+              isTopPick={topPickUrls.has(e.job.url)}
               onToggleSelect={() => toggleSelect(e.job.url)}
               onSave={() => save(e.job)}
               onSkip={() => skip(e.job)}

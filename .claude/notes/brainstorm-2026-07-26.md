@@ -562,3 +562,93 @@ Brainstorming continued productively after the correction above. Real findings a
 
 `compute-fit.mjs --self-test` still passes in full after all changes.
 
+## 23. Ranking-evaluation connector — real end-to-end verification, plus a real dead-posting gap found and closed (2026-08-03)
+
+Task #46 (top-pick badge + one-click "Evaluate top 3 picks" button + the daily-scan
+piece still pending) was built and visually verified last session, but the actual
+click-through had never been confirmed to trigger a real evaluate job. Traced it
+live in the browser:
+
+- **First real blocker (fixed): the Config page never persisted CLI selection.**
+  `config-form.tsx` auto-selects the first installed CLI (Claude Code, detected at
+  `/Users/adium/.local/bin/claude`) into React state and shows a checkmark — but
+  only writes it to `localStorage["career-ops:config"]` on an explicit "Save
+  config" click, which had never happened. `job-store.tsx`'s `startJob()` reads
+  that same key and instantly fails with "No CLI configured" if it's missing —
+  with no error surfaced beyond the worker sidebar, so every evaluate job (this
+  one included) was dying in under a second with no report, no tracker row, and
+  no visible reason on the pipeline page itself. Confirmed via
+  `localStorage.getItem("career-ops:config") === null` before the fix, `{"cliId":
+  "claude", ...}` after clicking Save. Real UX gap: auto-detection displaying as
+  "selected" without persisting is misleading — worth a follow-up (auto-save on
+  first detect, or a clearer "not saved yet" state) but not fixed here since it's
+  a UI-polish item, not what was asked.
+
+- **After the fix, 2 of 3 evaluate jobs completed for real**: Twilio (2.8/5,
+  report `009-twilio-2026-08-02.md`) and Bank of America (1.2/5, report
+  `008-bank-of-america-2026-08-02.md`), both merged into `data/applications.md`
+  (9→11 rows) exactly as expected — confirms the full chain (badge → button →
+  real `claude -p` evaluate job → report → tracker merge) genuinely works.
+
+- **Cox Automotive's evaluate job errored — but it wasn't a bug.** Its own agent
+  trace: fetched the posting, got a 404, and correctly refused to evaluate per
+  `AGENTS.md`'s liveness gate ("no evaluation, no report, no tracker entry").
+  Independently confirmed via `curl` — genuinely dead. The posting was scanned in
+  from The Muse's API on 2026-08-02 and was already 404 by 2026-08-03 — dead
+  within about a day. It still passed domain-fit and geo-fit, got ranked, and got
+  badged "top pick," so the connector correctly pointed the evaluate-job at it and
+  burned a real token spend discovering it was already gone.
+
+**Closed the gap**, per Aditya's explicit choice (wire into `filter-inbox-by-fit.mjs`
+at scan time, not just a pre-check on the 1-3 postings about to be evaluated):
+added a third liveness gate alongside the existing domain-fit and geo-fit gates.
+Two free rungs, both already-existing patterns reused rather than new machinery:
+`checkLivenessViaApi` (existing, ATS-only — Greenhouse/Lever/Ashby/Workday) tried
+first, `checkLivenessViaFetch` (new, added to `liveness-api.mjs`) as a fallback for
+non-ATS aggregator mirrors — a plain fetch (no Playwright) handed to the SAME pure
+`classifyLiveness()` classifier the Playwright rung already uses, just fed static
+HTML instead of a rendered DOM. Conservative by construction: only a definitive
+404/410 or a hard "no longer available" body pattern counts as dead; anything
+ambiguous (network error, redirect, bot-challenge, 403/503) stays in the pipeline.
+Dead entries move to a new `data/pipeline-dead-filtered.md` (gitignored, same
+pattern as the domain/geo filtered files) — archived, never deleted.
+
+**Caught my own bug before shipping it**: the first version of the concurrency-
+batched liveness pass called `checkPostingLiveness(entries[i].url)`, but the
+candidate objects are shaped `{line, parsed}` — `.url` doesn't exist at that level,
+it's `.parsed.url`. `new URL(undefined)` threw inside both liveness functions,
+silently caught by their own conservative error handling, and returned `null`
+(inconclusive) for literally every posting — a dry run showed "0 moved" system-
+wide, which is what caught it (the Cox Automotive case, independently confirmed
+dead via curl and a standalone reproduction of the exact same logic, should
+obviously have been flagged). Fixed to `entries[i].parsed.url` and re-ran.
+
+**Real yield on the live pipeline**: 51 of 243 pending postings were dead — mostly
+The Muse mirror listings that expire within about a day of being scanned (SpaceX,
+L3Harris, several Lyft driver postings, Cox Automotive, Disney, others). Spot-
+checked both directions: `spacex/power-systems-engineer-814598` is HTTP 200 but
+its body literally says "Job Not Found" (The Muse's soft-404 pattern — the hard-
+expired body-pattern rung, not just the HTTP-status rung, is pulling real weight
+here); a live Greenhouse/Zscaler posting in the same pipeline was correctly left
+alone. Ran for real: `data/pipeline.md` went from 243 → 193 pending, 51 written to
+`data/pipeline-dead-filtered.md` (dedup note: a few duplicate titles appear twice
+in the moved list — `data/pipeline.md` apparently carries some duplicate URL
+entries already; not something this pass introduced or needs to fix on its own).
+
+**Item 15, same session: nightly auto-evaluate, real end-to-end test run.** Built
+`auto-evaluate-top-picks.mjs` — same selection logic as the dashboard's button
+(fitRank order, not-yet-evaluated), cap raised to top 5 per Aditya's explicit
+choice, "only if genuinely new" falls out naturally from checking every report's
+`**URL:**` line rather than needing separate day-over-day state. Wired into
+`scripts/cron-daily-scan.sh` as a 4th step; updated that script's header comment
+to stop claiming zero-LLM-cost (it no longer is). Ran the real thing once, live,
+end to end (5 sequential `claude -p` calls, same tool scope/permission-mode as
+the web button): all 5 completed cleanly — Broadcom 1.6/5, Forcepoint 1.8/5,
+Thales x3 (1.5/5, 2.5/5, 1.3/5), reports 012–016, all merged into
+`data/applications.md` (11→18 rows total this session). All 5 independently
+converged on the same real signal: strong domain fit, hard India-remote-only geo
+blocker — the geo-eligibility work from earlier this session is now visibly
+doing its job at scale, not just in isolated test cases. Task #46 (ranking-
+evaluation connector: badge + button + auto-evaluate) is now complete
+end-to-end.
+
