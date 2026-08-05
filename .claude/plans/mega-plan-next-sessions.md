@@ -1,6 +1,25 @@
 # career-ops Mega Plan — Full System Rebuild (frontend + backend + orchestrator)
 
-## READ THIS FIRST — current as of 2026-08-03, supersedes everything below
+## READ THIS FIRST — current as of 2026-08-05, supersedes everything below
+
+The full, current system architecture reference now lives at
+`.claude/plans/architect-system-design.md` — a 21-section deep-dive covering
+every layer (identity/config, discovery, triage, ranking, evaluation,
+persistence, automation, web app, both apply/submit paths, analytics, budget
+tracking, onboarding/plugins, interview-prep/reply-watch, and tracker
+canonical states), plus the migration risk list and model-choice guidance.
+**Read that file first**, not the sections below — everything from
+2026-08-03 and earlier in this doc is superseded by it.
+
+That doc also defines the current workflow: Aditya + the "Architect" session
+discuss and design one feature at a time against that spec, then a fresh
+isolated session (git worktree) implements just that feature, reports back a
+diff, gets reviewed/tested, and merged — repeat, Aditya picks the order,
+commit/push periodically.
+
+---
+
+## READ THIS FIRST — current as of 2026-08-03, supersedes everything below (historical, see above)
 
 Everything below this section was written across four earlier sessions
 (2026-07-23 through 2026-07-26) and is now materially stale — a huge amount of
