@@ -89,7 +89,7 @@ export function readInbox(): InboxJob[] {
   return jobs;
 }
 
-export type FilteredKind = "domain" | "geo" | "dead";
+export type FilteredKind = "blacklist" | "domain" | "geo" | "dead";
 
 export type FilteredJob = {
   url: string;
@@ -101,6 +101,7 @@ export type FilteredJob = {
 };
 
 const FILTERED_FILES: { rel: string; kind: FilteredKind }[] = [
+  { rel: "data/pipeline-blacklisted-filtered.md", kind: "blacklist" },
   { rel: "data/pipeline-filtered.md", kind: "domain" },
   { rel: "data/pipeline-geo-filtered.md", kind: "geo" },
   { rel: "data/pipeline-dead-filtered.md", kind: "dead" },
@@ -168,7 +169,7 @@ export type FilteredPipelineSummary = {
 };
 
 export function readFilteredPipeline(): FilteredPipelineSummary {
-  const counts: Record<FilteredKind, number> = { domain: 0, geo: 0, dead: 0 };
+  const counts: Record<FilteredKind, number> = { blacklist: 0, domain: 0, geo: 0, dead: 0 };
   const items: FilteredJob[] = [];
   for (const { rel, kind } of FILTERED_FILES) {
     const md = read(rel);

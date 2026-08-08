@@ -40,9 +40,17 @@ import { fileURLToPath } from 'url';
 
 import { scoreDomainFit, classifyGeoEligibility, GEO_GATE_CONFIDENCE_THRESHOLD, TITLE_FIT_MIN_SCORE } from './compute-fit.mjs';
 import { checkLivenessViaApi, checkLivenessViaFetch } from './liveness-api.mjs';
+import { loadBlacklist } from './scan.mjs';
+import { normalizeCompany } from './tracker-utils.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const PIPELINE_PATH = join(ROOT, 'data/pipeline.md');
+// Checked FIRST, before domain-fit/geo/liveness — a pure Map lookup, the
+// cheapest possible gate, and there's no reason to score/geo-classify/
+// liveness-check something the user already said they never want to see
+// again. See loadBlacklist()/parseBlacklist() in scan.mjs (#1742) — this
+// script reuses that parsing as-is, never reimplements it.
+const BLACKLIST_FILTERED_PATH = join(ROOT, 'data/pipeline-blacklisted-filtered.md');
 const FILTERED_PATH = join(ROOT, 'data/pipeline-filtered.md');
 // SEPARATE from the domain-fit filtered file on purpose (2026-08-02 brainstorm
 // item #6, "make it visible, not a black box") — a posting excluded for
@@ -71,6 +79,22 @@ const LIVENESS_CONCURRENCY = 8;
 // share one definition instead of each keeping their own copy.
 
 const PENDING_MARKERS = ['## Pending', '## Pendientes'];
+
+const BLACKLIST_FILTERED_SKELETON = `# Pipeline — Filtered (blacklisted company)
+
+Entries moved here by filter-inbox-by-fit.mjs — the company appears in
+data/blacklist.md, the user's own do-not-apply list (user layer, opt-in,
+never auto-populated). Checked FIRST, before domain-fit/geo/liveness —
+cheapest possible gate (a pure map lookup), and there is no reason to score,
+geo-classify, or liveness-check something that was never going anywhere. See
+loadBlacklist()/parseBlacklist() in scan.mjs for the parsing logic. Nothing
+here is deleted; move an entry back into data/pipeline.md's "## Pending"
+section manually if it was filtered by mistake (or remove the row from
+data/blacklist.md so future scans stop excluding it too).
+
+## Blacklisted
+
+`;
 
 const FILTERED_SKELETON = `# Pipeline — Filtered (low domain fit)
 
@@ -211,6 +235,11 @@ async function main() {
     return;
   }
 
+  // Absolute path, explicitly — anchored off ROOT like every other path in
+  // this file, not the function's own relative-to-cwd default. Absent file =
+  // empty Map = no-op (see loadBlacklist's own contract in scan.mjs).
+  const blacklist = loadBlacklist(join(ROOT, 'data/blacklist.md'));
+  const alreadyBlacklistFiltered = loadExistingUrlsFrom(BLACKLIST_FILTERED_PATH);
   const alreadyDomainFiltered = loadExistingUrlsFrom(FILTERED_PATH);
   const alreadyGeoFiltered = loadExistingUrlsFrom(GEO_FILTERED_PATH);
   const alreadyDeadFiltered = loadExistingUrlsFrom(DEAD_FILTERED_PATH);
@@ -218,6 +247,7 @@ async function main() {
   // and postings that passed domain+geo fit as { line, parsed } so the liveness
   // pass below can check and drop the dead ones without disturbing order.
   const kept = [];
+  const movedBlacklist = [];
   const movedDomain = [];
   const movedGeo = [];
 
@@ -228,9 +258,18 @@ async function main() {
       kept.push(line); // blank lines / non-checkbox content pass through untouched
       continue;
     }
-    if (alreadyDomainFiltered.has(parsed.url) || alreadyGeoFiltered.has(parsed.url) || alreadyDeadFiltered.has(parsed.url)) {
+    if (alreadyBlacklistFiltered.has(parsed.url) || alreadyDomainFiltered.has(parsed.url) || alreadyGeoFiltered.has(parsed.url) || alreadyDeadFiltered.has(parsed.url)) {
       // Already moved in a prior run — idempotent no-op, drop from pending
       // without re-scoring or duplicating into a filtered file again.
+      continue;
+    }
+    // Gate 0 — blacklist. Cheapest check, so it runs before domain-fit/geo/
+    // liveness and skips them entirely for a match — no reason to spend a
+    // geo-classification or a live network liveness check on a company the
+    // user already opted out of entirely.
+    const blacklisted = blacklist.get(normalizeCompany(parsed.company));
+    if (blacklisted) {
+      movedBlacklist.push({ ...parsed, blacklistReason: blacklisted.reason || 'blacklisted' });
       continue;
     }
     const fitScore = scoreDomainFit(`${parsed.role} ${parsed.location || ''}`);
@@ -267,11 +306,15 @@ async function main() {
   });
 
   if (summaryOnly) {
-    const stillPending = bounds.end - bounds.start - 1 - movedDomain.length - movedGeo.length - alreadyDomainFiltered.size - alreadyGeoFiltered.size - alreadyDeadFiltered.size;
-    console.log(`Pending: ${Math.max(0, stillPending)} kept, ${movedDomain.length} newly domain-filtered, ${movedGeo.length} newly geo-filtered. (liveness check skipped in --summary mode)`);
+    const stillPending = bounds.end - bounds.start - 1 - movedBlacklist.length - movedDomain.length - movedGeo.length - alreadyBlacklistFiltered.size - alreadyDomainFiltered.size - alreadyGeoFiltered.size - alreadyDeadFiltered.size;
+    console.log(`Pending: ${Math.max(0, stillPending)} kept, ${movedBlacklist.length} newly blacklist-filtered, ${movedDomain.length} newly domain-filtered, ${movedGeo.length} newly geo-filtered. (liveness check skipped in --summary mode)`);
     return;
   }
 
+  console.log(`Blacklist filter: ${movedBlacklist.length} moved to data/pipeline-blacklisted-filtered.md.`);
+  for (const m of movedBlacklist) {
+    console.log(`  - ${m.company} | ${m.role} (${m.blacklistReason}) → blacklisted`);
+  }
   console.log(`Domain-fit filter: ${movedDomain.length} moved to data/pipeline-filtered.md.`);
   for (const m of movedDomain) {
     console.log(`  - ${m.company} | ${m.role} (fit score ${m.fitScore}) → filtered`);
@@ -291,7 +334,7 @@ async function main() {
     return;
   }
 
-  if (movedDomain.length === 0 && movedGeo.length === 0 && movedDead.length === 0) {
+  if (movedBlacklist.length === 0 && movedDomain.length === 0 && movedGeo.length === 0 && movedDead.length === 0) {
     console.log('Nothing to move.');
     return;
   }
@@ -299,6 +342,14 @@ async function main() {
   // Rewrite data/pipeline.md's Pending section with only the kept lines.
   const newLines = [...lines.slice(0, bounds.start + 1), ...finalKept, ...lines.slice(bounds.end)];
   writeFileSync(PIPELINE_PATH, newLines.join('\n'), 'utf-8');
+
+  if (movedBlacklist.length > 0) {
+    if (!existsSync(BLACKLIST_FILTERED_PATH)) writeFileSync(BLACKLIST_FILTERED_PATH, BLACKLIST_FILTERED_SKELETON, 'utf-8');
+    const blacklistLines = movedBlacklist
+      .map(m => `- [ ] ${m.url} | ${m.company} | ${m.role}${m.location ? ` | ${m.location}` : ''} (${m.blacklistReason})`)
+      .join('\n') + '\n';
+    writeFileSync(BLACKLIST_FILTERED_PATH, readFileSync(BLACKLIST_FILTERED_PATH, 'utf-8') + blacklistLines, 'utf-8');
+  }
 
   if (movedDomain.length > 0) {
     if (!existsSync(FILTERED_PATH)) writeFileSync(FILTERED_PATH, FILTERED_SKELETON, 'utf-8');
@@ -324,7 +375,11 @@ async function main() {
     writeFileSync(DEAD_FILTERED_PATH, readFileSync(DEAD_FILTERED_PATH, 'utf-8') + deadLines, 'utf-8');
   }
 
-  console.log(`\nWrote changes to data/pipeline.md, data/pipeline-filtered.md, data/pipeline-geo-filtered.md, and data/pipeline-dead-filtered.md.`);
+  const wroteFiles = ['data/pipeline.md'];
+  if (movedBlacklist.length > 0) wroteFiles.push('data/pipeline-blacklisted-filtered.md');
+  wroteFiles.push('data/pipeline-filtered.md', 'data/pipeline-geo-filtered.md', 'data/pipeline-dead-filtered.md');
+  const lastFile = wroteFiles.pop();
+  console.log(`\nWrote changes to ${wroteFiles.join(', ')}, and ${lastFile}.`);
 }
 
 main().catch((err) => {

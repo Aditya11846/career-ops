@@ -7,18 +7,20 @@ import { CompanyLogo } from "@/components/company-logo";
 import { cn } from "@/lib/cn";
 
 const KIND_LABEL: Record<FilteredKind, string> = {
+  blacklist: "Blacklisted",
   domain: "Domain fit",
   geo: "Geo-restricted",
   dead: "Dead posting",
 };
 
 const KIND_TONE: Record<FilteredKind, string> = {
+  blacklist: "border-violet-500/30 bg-violet-500/10 text-violet-600 dark:text-violet-400",
   domain: "border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400",
   geo: "border-sky-500/30 bg-sky-500/10 text-sky-600 dark:text-sky-400",
   dead: "border-red-500/30 bg-red-500/10 text-red-600 dark:text-red-400",
 };
 
-const KINDS: FilteredKind[] = ["domain", "geo", "dead"];
+const KINDS: FilteredKind[] = ["blacklist", "domain", "geo", "dead"];
 
 /** Read-only view of the postings filter-inbox-by-fit.mjs moved out of
  *  data/pipeline.md — same triage the nightly cron runs, and the same triage
