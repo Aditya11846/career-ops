@@ -89,6 +89,100 @@ export function readInbox(): InboxJob[] {
   return jobs;
 }
 
+export type FilteredKind = "domain" | "geo" | "dead";
+
+export type FilteredJob = {
+  url: string;
+  company: string;
+  role: string;
+  location?: string;
+  reason: string;
+  kind: FilteredKind;
+};
+
+const FILTERED_FILES: { rel: string; kind: FilteredKind }[] = [
+  { rel: "data/pipeline-filtered.md", kind: "domain" },
+  { rel: "data/pipeline-geo-filtered.md", kind: "geo" },
+  { rel: "data/pipeline-dead-filtered.md", kind: "dead" },
+];
+
+// Cap how many rows we actually hand to the client per file — these files are
+// append-only across every cron run ever (can run into the thousands), and
+// rendering all of them as DOM rows would be slow for no benefit. Counts stay
+// exact; only the row list is capped, to the MOST RECENT entries (tail of an
+// append-only file), which is what you'd actually want to review.
+const FILTERED_CAP = 300;
+
+/** Extract the LAST balanced top-level "(...)" group at the end of `text`, by
+ *  scanning backward with a depth counter — NOT a regex, because two separate
+ *  cases both appear in real data and a simple first/last-paren regex can't
+ *  handle both: a location that legitimately ends in its own parenthetical
+ *  ("India (remote)") immediately followed by the real reason
+ *  ("(ATS API 404 — posting removed)"), AND a reason that itself contains
+ *  nested parens ("pattern matched: job (listing )?not found"). Returns null
+ *  if the string doesn't end in ")" or the parens are unbalanced. */
+function splitTrailingParen(text: string): { before: string; inner: string } | null {
+  const trimmed = text.replace(/\s+$/, "");
+  if (!trimmed.endsWith(")")) return null;
+  let depth = 1;
+  let i = trimmed.length - 2;
+  for (; i >= 0; i--) {
+    const c = trimmed[i];
+    if (c === ")") depth++;
+    else if (c === "(") {
+      depth--;
+      if (depth === 0) break;
+    }
+  }
+  if (i < 0) return null;
+  return { before: trimmed.slice(0, i).trim(), inner: trimmed.slice(i + 1, trimmed.length - 1) };
+}
+
+/** Parse one `- [ ] url | company | role [| location] (reason)` line, written by
+ *  filter-inbox-by-fit.mjs. Reason is a parenthetical appended to whichever
+ *  field is last (location if present, else role). */
+function parseFilteredLine(line: string, kind: FilteredKind): FilteredJob | null {
+  const m = line.match(/^\s*-\s*\[([ xX])\]\s*(.+)$/);
+  if (!m) return null;
+  const segments = m[2].split("|").map((s) => s.trim());
+  if (segments.length < 3 || !segments[0]) return null;
+  const [url, company] = segments;
+  const last = segments[segments.length - 1];
+  const split = splitTrailingParen(last);
+  const lastText = split ? split.before : last;
+  const reason = split ? split.inner : "";
+  const hasLocation = segments.length >= 4;
+  return {
+    url,
+    company,
+    role: hasLocation ? segments[2] : lastText,
+    location: hasLocation ? lastText || undefined : undefined,
+    reason,
+    kind,
+  };
+}
+
+export type FilteredPipelineSummary = {
+  counts: Record<FilteredKind, number>;
+  items: FilteredJob[]; // capped, most-recent-first, across all three files
+};
+
+export function readFilteredPipeline(): FilteredPipelineSummary {
+  const counts: Record<FilteredKind, number> = { domain: 0, geo: 0, dead: 0 };
+  const items: FilteredJob[] = [];
+  for (const { rel, kind } of FILTERED_FILES) {
+    const md = read(rel);
+    if (!md) continue;
+    const lines = md.split("\n").filter((l) => /^\s*-\s*\[/.test(l));
+    counts[kind] = lines.length;
+    for (const line of lines.slice(-FILTERED_CAP).reverse()) {
+      const parsed = parseFilteredLine(line, kind);
+      if (parsed) items.push(parsed);
+    }
+  }
+  return { counts, items };
+}
+
 export type PostingSignal = {
   rank: number | null;
   geoEligibility: InboxJob["geoEligibility"];
@@ -224,6 +318,7 @@ export type PipelineSummary = {
   rootExists: boolean;
   inbox: InboxJob[];
   applications: Application[];
+  filtered: FilteredPipelineSummary;
 };
 
 export function pipelineSummary(): PipelineSummary {
@@ -247,6 +342,7 @@ export function pipelineSummary(): PipelineSummary {
       };
     }),
     applications: readApplications(),
+    filtered: readFilteredPipeline(),
   };
 }
 

@@ -80,3 +80,56 @@ process.stdin.on("end", () => {
     child.stdin.end();
   });
 }
+
+/**
+ * Result of the zero-LLM triage pass — domain-fit + geo-eligibility gate
+ * (filter-inbox-by-fit.mjs) followed by ranking (score-inbox.mjs), the SAME
+ * two scripts the nightly cron (scripts/cron-daily-scan.sh) runs after
+ * scan.mjs. Explore's "Add to pipeline" runs them too, right after writing,
+ * so a manually-added posting gets the identical domain/geo gate + fit score
+ * the cron gives every automatically-scanned one — no separate unfiltered
+ * path into data/pipeline.md.
+ */
+export type TriageResult = {
+  ranked: number;
+  kept?: number;
+  domainFiltered?: number;
+  geoFiltered?: number;
+  deadFiltered?: number;
+  error?: string;
+};
+
+function runScript(nameNoExt: string): Promise<{ out: string; err: string; code: number | null }> {
+  return new Promise((resolve) => {
+    const child = spawn(process.execPath, [rootScript(nameNoExt)], { cwd: careerOpsRoot(), env: process.env });
+    let out = "";
+    let err = "";
+    child.stdout.on("data", (d: Buffer) => (out += d.toString()));
+    child.stderr.on("data", (d: Buffer) => (err += d.toString()));
+    child.on("error", (e) => resolve({ out, err: e instanceof Error ? e.message : "spawn failed", code: null }));
+    child.on("close", (code) => resolve({ out, err, code }));
+  });
+}
+
+export async function runInboxTriage(): Promise<TriageResult> {
+  if (!fs.existsSync(rootScript("filter-inbox-by-fit")) || !fs.existsSync(rootScript("score-inbox"))) {
+    return { ranked: 0, error: "This checkout is data-only — the triage scripts aren't available." };
+  }
+
+  const filterRun = await runScript("filter-inbox-by-fit");
+  if (filterRun.code !== 0) {
+    return { ranked: 0, error: filterRun.err.trim().slice(0, 200) || "filter-inbox-by-fit.mjs failed" };
+  }
+  const domainFiltered = Number(filterRun.out.match(/Domain-fit filter: (\d+) moved/)?.[1] ?? 0);
+  const geoFiltered = Number(filterRun.out.match(/Geo filter: (\d+) moved/)?.[1] ?? 0);
+  const deadFiltered = Number(filterRun.out.match(/Liveness filter: (\d+) moved/)?.[1] ?? 0);
+  const kept = Number(filterRun.out.match(/(\d+) stay in data\/pipeline\.md/)?.[1] ?? 0);
+
+  const scoreRun = await runScript("score-inbox");
+  if (scoreRun.code !== 0) {
+    return { ranked: 0, kept, domainFiltered, geoFiltered, deadFiltered, error: scoreRun.err.trim().slice(0, 200) || "score-inbox.mjs failed" };
+  }
+  const ranked = Number(scoreRun.out.match(/Scored (\d+) pending entries/)?.[1] ?? 0);
+
+  return { ranked, kept, domainFiltered, geoFiltered, deadFiltered };
+}

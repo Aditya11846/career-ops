@@ -4,16 +4,20 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Search, ChevronsUpDown, X, Compass, ArrowRight } from "lucide-react";
-import type { Application, InboxJob } from "@/lib/career-ops";
+import type { Application, FilteredPipelineSummary, InboxJob } from "@/lib/career-ops";
 import { Badge } from "@/components/ui/badge";
 import { CompanyLogo } from "@/components/company-logo";
 import { canonStatus, scoreNum, scoreTone, statusDot } from "@/lib/format";
 import { InboxTriage } from "@/components/inbox/inbox-triage";
+import { FilteredList } from "@/components/pipeline/filtered-list";
 import { cn } from "@/lib/cn";
 
-// INBOX (the triage queue) is the default tab; the rest filter the tracker.
+// INBOX (the triage queue) is the default tab; FILTERED is a read-only view
+// of what the domain/geo/liveness triage moved OUT of the inbox (not part of
+// the applications tracker); the rest filter the tracker.
 const TABS = [
   "INBOX",
+  "FILTERED",
   "ALL",
   "EVALUATED",
   "APPLIED",
@@ -32,9 +36,11 @@ type SortKey = (typeof SORT_KEYS)[number];
 export function PipelineView({
   applications,
   inbox,
+  filtered,
 }: {
   applications: Application[];
   inbox: InboxJob[];
+  filtered: FilteredPipelineSummary;
 }) {
   const params = useSearchParams();
   const router = useRouter();
@@ -89,8 +95,8 @@ export function PipelineView({
     return out;
   }, [inbox]);
 
-  const filtered = useMemo(() => {
-    if (tab === "INBOX") return [];
+  const trackerRows = useMemo(() => {
+    if (tab === "INBOX" || tab === "FILTERED") return [];
     let rows = applications;
     if (tab !== "ALL") rows = rows.filter((r) => canonStatus(r.status).includes(tab));
     if (minFilter != null) {
@@ -126,7 +132,7 @@ export function PipelineView({
           </p>
         </div>
         {/* the tracker has its own search; the inbox brings its own facet filters */}
-        {tab !== "INBOX" && (
+        {tab !== "INBOX" && tab !== "FILTERED" && (
           <div className="relative w-64 max-w-[40vw]">
             <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-faint" />
             <input
@@ -145,9 +151,11 @@ export function PipelineView({
           const count =
             t === "INBOX"
               ? pendingInbox.length
-              : t === "ALL"
-                ? applications.length
-                : applications.filter((r) => canonStatus(r.status).includes(t)).length;
+              : t === "FILTERED"
+                ? filtered.counts.domain + filtered.counts.geo + filtered.counts.dead
+                : t === "ALL"
+                  ? applications.length
+                  : applications.filter((r) => canonStatus(r.status).includes(t)).length;
           return (
             <button
               key={t}
@@ -165,7 +173,7 @@ export function PipelineView({
         })}
       </div>
 
-      {tab !== "INBOX" && minFilter != null && (
+      {tab !== "INBOX" && tab !== "FILTERED" && minFilter != null && (
         <div className="mt-3 flex items-center gap-2">
           <span className="text-xs text-faint">Filtered:</span>
           <button
@@ -187,7 +195,9 @@ export function PipelineView({
         ) : (
           <InboxEmpty count={0} filtered={false} />
         )
-      ) : filtered.length > 0 ? (
+      ) : tab === "FILTERED" ? (
+        <FilteredList filtered={filtered} />
+      ) : trackerRows.length > 0 ? (
         /* ── Tracker table ── */
         <div className="mt-4 overflow-hidden rounded-2xl border border-border">
           <table className="w-full text-sm">
@@ -208,7 +218,7 @@ export function PipelineView({
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
-              {filtered.map((r, i) => (
+              {trackerRows.map((r, i) => (
                 <tr key={`${r.n}-${i}`} className="group transition-colors hover:bg-surface/40">
                   <td className="px-4 py-3 font-medium">
                     <Link href={`/pipeline/${r.n}`} className="flex items-center gap-2.5 transition-colors group-hover:text-brand">
