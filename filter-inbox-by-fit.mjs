@@ -11,7 +11,8 @@
  * active pending list, using the title+location text (cheap, available for
  * every provider) scored by compute-fit.mjs's scoreDomainFit()/
  * scoreDomainFit() heuristic already built and tested, against a threshold
- * calibrated for title-length text (see TITLE_FIT_MIN_SCORE below).
+ * calibrated for title-length text (see compute-fit.mjs's exported
+ * TITLE_FIT_MIN_SCORE).
  *
  * Deliberately NOT a modification of scan.mjs itself — that's career-ops' own
  * shared system-layer scanner; this domain-specific triage logic belongs in
@@ -37,7 +38,7 @@ import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
-import { scoreDomainFit, classifyGeoEligibility, GEO_GATE_CONFIDENCE_THRESHOLD } from './compute-fit.mjs';
+import { scoreDomainFit, classifyGeoEligibility, GEO_GATE_CONFIDENCE_THRESHOLD, TITLE_FIT_MIN_SCORE } from './compute-fit.mjs';
 import { checkLivenessViaApi, checkLivenessViaFetch } from './liveness-api.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
@@ -64,16 +65,10 @@ const DEAD_FILTERED_PATH = join(ROOT, 'data/pipeline-dead-filtered.md');
 // section doesn't fire 200+ simultaneous outbound requests at once.
 const LIVENESS_CONCURRENCY = 8;
 
-// compute-fit.mjs's DOMAIN_FIT_GATE_THRESHOLD (20) is calibrated for full JD
-// paragraph text at evaluation time, where several keyword phrases can appear
-// together. A bare 3-5 word job title can realistically only ever hit one or
-// two keywords — verified live: "Staff Security Engineer" scores 6, well
-// below 20, even though it's obviously on-domain. Applying the JD threshold to
-// title-only text would filter out genuinely relevant postings. This is a
-// deliberately separate, much lower bar for the cheap title-only triage pass:
-// any keyword hit at all (score > 0) is real positive signal at this length;
-// zero means no domain-relevant word appeared anywhere in the title/location.
-const TITLE_FIT_MIN_SCORE = 1;
+// TITLE_FIT_MIN_SCORE (the cheap title/location-only triage bar, much lower
+// than DOMAIN_FIT_GATE_THRESHOLD's full-JD-text bar) now lives in
+// compute-fit.mjs, exported, so this script and web/src/lib/core/scan.ts
+// share one definition instead of each keeping their own copy.
 
 const PENDING_MARKERS = ['## Pending', '## Pendientes'];
 

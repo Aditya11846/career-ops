@@ -11,7 +11,7 @@ import { useExplore } from "./explore-provider";
 export type EnrichedOffer = DiscoveredOffer & { inPipeline: boolean; evaluatedN?: string };
 
 export function ResultsList({ offers }: { offers: EnrichedOffer[] }) {
-  const { companiesScanned, partial, addToPipeline, added, mode } = useExplore();
+  const { companiesScanned, scanDomainFiltered, partial, addToPipeline, added, mode, lastTriage } = useExplore();
   const isAi = mode === "ai";
   const [sort, setSort] = useState<"fresh" | "company">("fresh");
   const [q, setQ] = useState("");
@@ -30,6 +30,21 @@ export function ResultsList({ offers }: { offers: EnrichedOffer[] }) {
 
   return (
     <div className="space-y-4">
+      {lastTriage && (
+        <div className="rounded-lg border border-border bg-surface/40 px-3 py-2 text-xs text-muted">
+          {lastTriage.error ? (
+            <span>Added, but the automatic fit/geo triage didn&apos;t run: {lastTriage.error}</span>
+          ) : (
+            <span>
+              Triaged same as the nightly scan —{" "}
+              <span className="font-medium text-foreground">{lastTriage.kept ?? lastTriage.ranked} kept</span> in pipeline
+              {!!lastTriage.domainFiltered && `, ${lastTriage.domainFiltered} filtered (domain fit)`}
+              {!!lastTriage.geoFiltered && `, ${lastTriage.geoFiltered} filtered (geo)`}
+              {!!lastTriage.deadFiltered && `, ${lastTriage.deadFiltered} filtered (dead posting)`}.
+            </span>
+          )}
+        </div>
+      )}
       <div className="flex flex-wrap items-center gap-3">
         <div>
           <p className="text-sm text-foreground">
@@ -39,7 +54,7 @@ export function ResultsList({ offers }: { offers: EnrichedOffer[] }) {
           <p className="text-[12px] text-faint">
             {isAi
               ? "found by AI on the open web · unverified until you evaluate"
-              : `${companiesScanned > 0 ? `${companiesScanned.toLocaleString()} companies scanned · ` : ""}0 tokens spent${partial ? " · some boards were unreachable (normal for public directories)" : ""}`}
+              : `${companiesScanned > 0 ? `${companiesScanned.toLocaleString()} companies scanned · ` : ""}0 tokens spent${partial ? " · some boards were unreachable (normal for public directories)" : ""}${scanDomainFiltered > 0 ? ` · ${scanDomainFiltered.toLocaleString()} filtered as off-domain` : ""}`}
           </p>
         </div>
 

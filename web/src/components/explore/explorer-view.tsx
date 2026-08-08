@@ -97,7 +97,9 @@ export function ExplorerView({
   const isAi = mode === "ai";
   if (running) return isAi ? <AiHuntView cliName={cli.name} /> : <DiscoveringState />;
 
-  const canDiscover = filters.ats.length > 0;
+  // Either discovery source alone is sufficient — seeds are now the default
+  // (ats starts empty), so this can no longer gate on ats alone.
+  const canDiscover = filters.ats.length > 0 || filters.seeds.length > 0;
   const isResults = phase === "results";
 
   return (

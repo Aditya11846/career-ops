@@ -30,6 +30,17 @@ export type Phase =
   | "hunting" // AI search streaming
   | "blocked"; // AI search needs a CLI
 export type AiCost = { searches: number; candidates: number; fetches: number };
+/** Client-safe mirror of pipeline.ts's TriageResult (server-only file, not
+ *  importable from a client component) — the automatic domain/geo-fit +
+ *  ranking pass Explore's "Add to pipeline" now runs on every add. */
+export type TriageSummary = {
+  ranked: number;
+  kept?: number;
+  domainFiltered?: number;
+  geoFiltered?: number;
+  deadFiltered?: number;
+  error?: string;
+};
 export type SourceState = {
   state: "queued" | "active" | "swept" | "noisy";
   companies?: number;
@@ -54,11 +65,17 @@ type ExploreCtx = {
   companiesAvailable: number;
   capHit: boolean;
   droppedNoDate: number;
+  /** Scan-time domain-fit drop count (ScanEvent summary's domainFiltered) — how
+   *  many postings this scan matched location/date but dropped as off-domain.
+   *  Distinct from lastTriage.domainFiltered, which is a separate post-add
+   *  triage count populated after "Add to pipeline". */
+  scanDomainFiltered: number;
   status: string;
   partial: boolean;
   error: string;
   added: Set<string>;
   adding: Set<string>;
+  lastTriage: TriageSummary | null;
   discover: () => Promise<void>;
   addToPipeline: (offers: DiscoveredOffer[]) => Promise<number>;
   applyPatch: (raw: Record<string, unknown>, opts?: { merge?: boolean; run?: boolean }) => void;
@@ -94,6 +111,7 @@ type ResultSnapshot = {
   companiesAvailable: number;
   capHit: boolean;
   droppedNoDate: number;
+  scanDomainFiltered: number;
   sources: Partial<Record<AtsSource, SourceState>>;
   partial: boolean;
   status: string;
@@ -118,10 +136,13 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
   const [companiesAvailable, setCompaniesAvailable] = useState(0);
   const [capHit, setCapHit] = useState(false);
   const [droppedNoDate, setDroppedNoDate] = useState(0);
+  // Scan-time domain-fit drop count (see ExploreCtx's scanDomainFiltered doc).
+  const [scanDomainFiltered, setScanDomainFiltered] = useState(0);
   const [status, setStatus] = useState("");
   const [partial, setPartial] = useState(false);
   const [error, setError] = useState("");
   const [added, setAdded] = useState<Set<string>>(new Set());
+  const [lastTriage, setLastTriage] = useState<TriageSummary | null>(null);
   const [adding, setAdding] = useState<Set<string>>(new Set());
   const [mode, setModeState] = useState<ExploreMode>("scan");
   const [aiIntent, setAiIntent] = useState("");
@@ -155,6 +176,7 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
     setCompaniesAvailable(0);
     setCapHit(false);
     setDroppedNoDate(0);
+    setScanDomainFiltered(0);
     setPartial(false);
     setError("");
     setStatus("Casting the net across the ATS network…");
@@ -224,6 +246,7 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
               case "summary": {
                 companiesScannedAcc = ev.companiesScanned;
                 setCompaniesScanned(ev.companiesScanned);
+                if (typeof ev.domainFiltered === "number") setScanDomainFiltered(ev.domainFiltered);
                 if (typeof ev.companiesAvailable === "number") setCompaniesAvailable(ev.companiesAvailable);
                 if (ev.capHit) {
                   capHitAcc = true;
@@ -288,9 +311,10 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ offers: fresh }),
       });
-      const d = (await r.json()) as { added?: number };
+      const d = (await r.json()) as { added?: number; triage?: TriageSummary };
       if (d.added && d.added > 0) {
         setAdded((s) => new Set([...s, ...fresh.map((o) => o.url)]));
+        setLastTriage(d.triage ?? null);
         // The new inbox rows were written server-side. Invalidate the Next router
         // cache so the (server-rendered) Pipeline view shows them instead of a stale
         // snapshot, and ping live listeners (today's dashboard, pipeline provider) —
@@ -465,6 +489,7 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
     setCompaniesAvailable(snap.companiesAvailable ?? 0);
     setCapHit(!!snap.capHit);
     setDroppedNoDate(snap.droppedNoDate ?? 0);
+    setScanDomainFiltered(snap.scanDomainFiltered ?? 0);
     setSources(snap.sources ?? {});
     setPartial(!!snap.partial);
     setStatus(typeof snap.status === "string" ? snap.status : "");
@@ -484,24 +509,24 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
     if (!SETTLED.has(phase)) return;
     try {
       const snap: ResultSnapshot = {
-        v: 1, mode, phase, offers, matchCount, companiesScanned, companiesAvailable, capHit, droppedNoDate, sources,
+        v: 1, mode, phase, offers, matchCount, companiesScanned, companiesAvailable, capHit, droppedNoDate, scanDomainFiltered, sources,
         partial, status, error, added: [...added], aiTrace, aiCost, aiIntent,
       };
       sessionStorage.setItem(RESULTS_KEY, JSON.stringify(snap));
     } catch {
       /* sessionStorage full/unavailable — non-fatal */
     }
-  }, [phase, mode, offers, matchCount, companiesScanned, companiesAvailable, capHit, droppedNoDate, sources, partial, status, error, added, aiTrace, aiCost, aiIntent]);
+  }, [phase, mode, offers, matchCount, companiesScanned, companiesAvailable, capHit, droppedNoDate, scanDomainFiltered, sources, partial, status, error, added, aiTrace, aiCost, aiIntent]);
 
   const value = useMemo(
     () => ({
       filters, setFilters, initFilters, phase,
       running: phase === "casting" || phase === "scanning" || phase === "revealing" || phase === "hunting",
-      offers, sources, matchCount, companiesScanned, companiesAvailable, capHit, droppedNoDate, status, partial, error, added, adding,
+      offers, sources, matchCount, companiesScanned, companiesAvailable, capHit, droppedNoDate, scanDomainFiltered, status, partial, error, added, adding, lastTriage,
       discover, addToPipeline, applyPatch, reset,
       mode, setMode, aiIntent, setAiIntent, discoverAI, aiTrace, aiCost,
     }),
-    [filters, setFilters, initFilters, phase, offers, sources, matchCount, companiesScanned, companiesAvailable, capHit, droppedNoDate, status, partial, error, added, adding, discover, addToPipeline, applyPatch, reset, mode, setMode, aiIntent, discoverAI, aiTrace, aiCost],
+    [filters, setFilters, initFilters, phase, offers, sources, matchCount, companiesScanned, companiesAvailable, capHit, droppedNoDate, scanDomainFiltered, status, partial, error, added, adding, lastTriage, discover, addToPipeline, applyPatch, reset, mode, setMode, aiIntent, discoverAI, aiTrace, aiCost],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

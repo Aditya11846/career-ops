@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import { careerOpsRoot, rootScript } from "@/lib/career-ops";
 import { writeTempPortals, cleanupTempPortals } from "./portals";
-import { ATS_SOURCES, type DiscoveredOffer, type ExploreFilters, type ScanEvent } from "@/lib/explore";
+import { ATS_SOURCES, SEED_SOURCES, type DiscoveredOffer, type ExploreFilters, type ScanEvent } from "@/lib/explore";
 
 export type { DiscoveredOffer, ScanEvent, AtsSource } from "@/lib/explore";
 export { ATS_SOURCES } from "@/lib/explore";
@@ -80,10 +80,49 @@ type ScanJson = {
   offers?: JsonOffer[];
 };
 
-export function runDiscovery(filters: ExploreFilters, onEvent: (e: ScanEvent) => void): Promise<DiscoveredOffer[]> {
+// Explore's title_filter is deliberately empty (title isn't a useful signal
+// for this search — see portals.yml), so scan-ats-full.mjs streams back
+// EVERY posting matching location/date/etc. with zero relevance filtering.
+// This applies the same title/location domain-fit gate the nightly pipeline
+// already runs post-scan (compute-fit.mjs's scoreDomainFit(), gated at
+// TITLE_FIT_MIN_SCORE via filter-inbox-by-fit.mjs) directly to the live
+// stream, so a manual Explore scan and the automated pipeline agree on what
+// counts as on-domain instead of Explore showing everything unfiltered.
+// Loaded via dynamic import of the root .mjs (not a relative TS import) —
+// compute-fit.mjs is career-ops' own root-level system-layer script, run
+// from Node at request time, same pattern as this file's own use of
+// careerOpsRoot()/rootScript() to reach root scripts.
+type DomainFitModule = { scoreDomainFit: (text: string) => number; TITLE_FIT_MIN_SCORE: number };
+let domainFitModule: DomainFitModule | null = null;
+// A plain `import(rootScript("compute-fit"))` fails under Turbopack/webpack —
+// "Cannot find module as expression is too dynamic" — because the bundler
+// tries to statically resolve the import() argument and rootScript()'s
+// return value isn't a literal. Routing the call through `new Function` puts
+// it outside the bundler's static analysis (the standard workaround for this
+// exact error), so it stays a genuine runtime dynamic import of an absolute
+// filesystem path, same as pipeline.ts's existing spawn()-based pattern for
+// reaching root scripts, just in-process instead of a subprocess (needed
+// here since this runs once per streamed offer, not once per request).
+const dynamicImport = new Function("specifier", "return import(specifier)") as (specifier: string) => Promise<DomainFitModule>;
+async function loadDomainFit(): Promise<DomainFitModule> {
+  if (!domainFitModule) {
+    domainFitModule = await dynamicImport(rootScript("compute-fit"));
+  }
+  return domainFitModule;
+}
+
+export async function runDiscovery(filters: ExploreFilters, onEvent: (e: ScanEvent) => void): Promise<DiscoveredOffer[]> {
+  const { scoreDomainFit, TITLE_FIT_MIN_SCORE } = await loadDomainFit();
   return new Promise((resolve) => {
     const tempPortals = writeTempPortals(filters);
-    const ats = (filters.ats.length ? filters.ats : [...ATS_SOURCES]).filter((a) => (ATS_SOURCES as readonly string[]).includes(a));
+    // An empty ats selection is now a meaningful, intentional state (seed-
+    // sources-only discovery, the new default — see DEFAULT_FILTERS.ats in
+    // lib/explore.ts) — no fallback to the full ATS_SOURCES list here.
+    // scan-ats-full.mjs's own --ats parsing treats an empty joined string the
+    // same as the flag being absent, and falls back to a full directory walk
+    // itself ONLY when seeds are also empty — exactly the desired behavior.
+    const ats = filters.ats.filter((a) => (ATS_SOURCES as readonly string[]).includes(a));
+    const seeds = (filters.seeds ?? []).filter((s) => (SEED_SOURCES as readonly string[]).includes(s));
     const useJson = scannerSupportsJson();
     const args = [
       rootScript("scan-ats-full"),
@@ -95,6 +134,7 @@ export function runDiscovery(filters: ExploreFilters, onEvent: (e: ScanEvent) =>
       "--limit",
       String(Math.max(1, filters.limitPerAts || 150)),
     ];
+    if (seeds.length) args.push("--seeds", seeds.join(","));
     if (useJson) args.push("--json");
 
     const child = spawn(process.execPath, args, {
@@ -108,6 +148,7 @@ export function runDiscovery(filters: ExploreFilters, onEvent: (e: ScanEvent) =>
     let pending: Omit<DiscoveredOffer, "url"> | null = null;
     let companiesScanned = 0;
     let unreachable = 0;
+    let domainFiltered = 0;
     let outBuf = "";
     let errBuf = "";
     let jsonOut = ""; // --json mode: the single stdout object accumulates here
@@ -146,9 +187,13 @@ export function runDiscovery(filters: ExploreFilters, onEvent: (e: ScanEvent) =>
         const url = trimmed.split(/\s+/)[0];
         if (!seen.has(url)) {
           seen.add(url);
-          const offer: DiscoveredOffer = { ...pending, url, matchedKeyword: firstMatch(pending.title, filters.positive) };
-          offers.push(offer);
-          onEvent({ kind: "offer", offer });
+          if (scoreDomainFit(`${pending.title} ${pending.location || ""}`) >= TITLE_FIT_MIN_SCORE) {
+            const offer: DiscoveredOffer = { ...pending, url, matchedKeyword: firstMatch(pending.title, filters.positive) };
+            offers.push(offer);
+            onEvent({ kind: "offer", offer });
+          } else {
+            domainFiltered++;
+          }
         }
         pending = null;
         return;
@@ -188,7 +233,7 @@ export function runDiscovery(filters: ExploreFilters, onEvent: (e: ScanEvent) =>
       }
       const sumM = line.match(SUMMARY_RE);
       if (sumM) {
-        onEvent({ kind: "summary", companiesScanned, unreachable, matches: Number(sumM[1]) });
+        onEvent({ kind: "summary", companiesScanned, unreachable, matches: Number(sumM[1]), domainFiltered });
         return;
       }
     };
@@ -235,6 +280,10 @@ export function runDiscovery(filters: ExploreFilters, onEvent: (e: ScanEvent) =>
             const url = (o.url || "").trim();
             if (!url || seen.has(url) || !o.company || !o.title) continue;
             seen.add(url);
+            if (scoreDomainFit(`${o.title} ${o.location || ""}`) < TITLE_FIT_MIN_SCORE) {
+              domainFiltered++;
+              continue;
+            }
             const source = o.source || `${currentAts}-full`;
             const offer: DiscoveredOffer = {
               company: o.company,
@@ -258,6 +307,7 @@ export function runDiscovery(filters: ExploreFilters, onEvent: (e: ScanEvent) =>
             capHit: j.capHit,
             datasetStatus: j.datasetStatus,
             postingsDroppedNoDate: j.postingsDroppedNoDate,
+            domainFiltered,
           });
         } else {
           // --json requested but stdout didn't parse — surface honestly rather than

@@ -3,7 +3,8 @@
 import { useState } from "react";
 import { X, Ban, Clock, MapPin, ChevronDown, SlidersHorizontal } from "lucide-react";
 import { cn } from "@/lib/cn";
-import { ATS_LABEL, ATS_SOURCES, cleanChips, type AtsSource, type ExploreFilters } from "@/lib/explore";
+import { ATS_LABEL, ATS_SOURCES, SEED_LABEL, SEED_SOURCES, cleanChips, type AtsSource, type SeedSource, type ExploreFilters } from "@/lib/explore";
+import { CostBadge } from "@/components/cost/cost-badge";
 
 const RECENCY = [
   { label: "24h", days: 1 },
@@ -111,8 +112,14 @@ export function FilterBuilder({
   const set = (patch: Partial<ExploreFilters>) => onChange({ ...filters, ...patch });
   const toggleAts = (a: AtsSource) => {
     const has = filters.ats.includes(a);
-    const next = has ? filters.ats.filter((x) => x !== a) : [...filters.ats, a];
-    set({ ats: next.length ? next : filters.ats });
+    // Zero ats sources is now a valid, meaningful state (seed-only discovery)
+    // — unlike the seed toggle below, this one is allowed to go empty.
+    set({ ats: has ? filters.ats.filter((x) => x !== a) : [...filters.ats, a] });
+  };
+  const toggleSeed = (s: SeedSource) => {
+    const has = filters.seeds.includes(s);
+    const next = has ? filters.seeds.filter((x) => x !== s) : [...filters.seeds, s];
+    set({ seeds: next });
   };
 
   return (
@@ -157,7 +164,34 @@ export function FilterBuilder({
         </div>
 
         <div>
-          <Label hint={filters.ats.length === 0 ? "pick at least one" : undefined}>Sources</Label>
+          <Label hint="company-first · recommended">
+            <span className="inline-flex items-center gap-1.5">
+              Seed sources
+              <CostBadge kind="free-network" size="xs" />
+            </span>
+          </Label>
+          <div className="flex flex-wrap gap-1.5">
+            {SEED_SOURCES.map((s) => {
+              const on = filters.seeds.includes(s);
+              return (
+                <button
+                  key={s}
+                  type="button"
+                  onClick={() => toggleSeed(s)}
+                  className={cn(
+                    "rounded-full border px-2.5 py-1 text-xs font-medium transition-colors max-sm:min-h-[44px]",
+                    on ? "border-brand/40 bg-brand-soft text-brand" : "border-border text-muted hover:text-foreground",
+                  )}
+                >
+                  {SEED_LABEL[s]}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <div>
+          <Label hint="raw directory crawl · cast a wider net">Also scan full ATS directories</Label>
           <div className="flex flex-wrap gap-1.5">
             {ATS_SOURCES.map((a) => {
               const on = filters.ats.includes(a);

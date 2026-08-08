@@ -78,19 +78,29 @@ function loadYaml(rel: string): Record<string, unknown> | null {
  * portals has none. Never throws — a bare checkout just yields DEFAULT_FILTERS.
  */
 export function seedExploreFilters(): { filters: ExploreFilters; seededFrom: string[] } {
-  const filters: ExploreFilters = { ...DEFAULT_FILTERS, ats: [...DEFAULT_FILTERS.ats] };
+  const filters: ExploreFilters = { ...DEFAULT_FILTERS, ats: [...DEFAULT_FILTERS.ats], seeds: [...DEFAULT_FILTERS.seeds] };
   const seededFrom: string[] = [];
 
   const portals = loadYaml("portals.yml");
   if (portals) {
     const tf = (portals.title_filter ?? {}) as Record<string, unknown>;
     const lf = (portals.location_filter ?? {}) as Record<string, unknown>;
-    filters.positive = listFrom(tf.positive);
-    filters.negative = listFrom(tf.negative);
-    filters.allow = listFrom(lf.allow);
-    filters.block = listFrom(lf.block);
-    filters.alwaysAllow = listFrom(lf.always_allow);
-    if (filters.positive.length || filters.allow.length || filters.block.length) seededFrom.push("portals.yml");
+    // Only override a field when portals.yml actually has something — this
+    // project's own portals.yml deliberately keeps title_filter empty (title
+    // isn't a useful signal for this search; see AGENTS.md/scan.mjs), and an
+    // unconditional overwrite would wipe DEFAULT_FILTERS' suggested keywords
+    // back to empty on every fresh page load, silently undoing Part B's fix.
+    const tfPositive = listFrom(tf.positive);
+    const tfNegative = listFrom(tf.negative);
+    const lfAllow = listFrom(lf.allow);
+    const lfBlock = listFrom(lf.block);
+    const lfAlwaysAllow = listFrom(lf.always_allow);
+    if (tfPositive.length) filters.positive = tfPositive;
+    if (tfNegative.length) filters.negative = tfNegative;
+    if (lfAllow.length) filters.allow = lfAllow;
+    if (lfBlock.length) filters.block = lfBlock;
+    if (lfAlwaysAllow.length) filters.alwaysAllow = lfAlwaysAllow;
+    if (tfPositive.length || lfAllow.length || lfBlock.length) seededFrom.push("portals.yml");
   }
 
   if (filters.positive.length === 0) {

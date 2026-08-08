@@ -300,33 +300,90 @@ const DOMAIN_KEYWORDS = {
   // General technical range actually on his CV (compilers/VLIW at Synergy,
   // caching/virtualization/NoSQL at PrimaryIO, IoT/cloud at KOKO, mobile SDKs
   // at Nuance/Aztecsoft) — real, but broader than the core specializations.
+  //
+  // 'driver' (bare) was removed (2026-08-08) — real production false positive,
+  // live-confirmed: "Store Driver" / "CDL Delivery Truck Driver" (logistics
+  // roles) scored a moderate hit purely because the word "driver" appeared,
+  // meant only to catch "kernel driver"/"device driver" embedded-systems
+  // work. Word-boundary matching (see scoreDomainFit below) fixes the
+  // substring-hides-inside-a-word failure mode, but "driver" alone is a
+  // genuinely ambiguous whole word no boundary fix can solve — replaced with
+  // the specific compound phrases actually meant.
   moderate: [
     'c++', 'embedded', 'firmware', 'security engineer', 'systems engineer', 'network security', 'cryptography', 'encryption',
-    'compiler', 'distributed systems', 'cloud computing', 'virtualization', 'iot', 'kernel', 'driver',
+    'compiler', 'distributed systems', 'cloud computing', 'virtualization', 'iot', 'kernel',
+    'device driver', 'driver development',
     'real-time', 'socket programming', 'multithreading', 'mobile sdk',
   ],
   // Specific languages/tools on his CV — real evidence he could contribute
   // technically, but common enough across unrelated domains that a match here
   // alone should never carry a posting past the gate by itself.
+  //
+  // 'swift' (Apple's language) removed (2026-08-08) — same genuinely-ambiguous-
+  // whole-word problem as 'driver' above: it's also a plain English word and
+  // the name of a real company (Swift Transportation, a trucking carrier).
+  // Low weight (3pts) wasn't worth the ambiguity.
   general: [
-    'python', 'java', 'golang', 'kotlin', 'swift', 'objective-c', 'c#',
+    'python', 'java', 'golang', 'kotlin', 'objective-c', 'c#',
     'tcp/ip', 'android', 'ios', 'linux kernel', 'bluetooth',
   ],
 };
 
+// Every current and future keyword needs word-boundary matching, not just a
+// hand-picked few — text.includes(kw) has two independent failure modes,
+// both live-confirmed in production scan data: (1) short terms hiding inside
+// unrelated words ('ios' matched inside "biostatistics"; 'iot' would
+// structurally hide inside "patriot" the same way) and (2) genuinely
+// ambiguous whole words (handled above by removing/replacing the specific
+// offenders, since no regex fix can disambiguate a real word from itself).
+// This mirrors classifyGeoEligibility's identical fix for "india" matching
+// inside "Indiana" (see INDIA_PATTERN above) — same bug class, same fix,
+// applied structurally here instead of one keyword at a time.
+function escapeRegExp(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+function compileKeywordRegexes(keywords) {
+  return keywords.map(kw => ({ kw, re: new RegExp(`\\b${escapeRegExp(kw)}\\b`, 'i') }));
+}
+const DOMAIN_KEYWORD_REGEXES = {
+  strong: compileKeywordRegexes(DOMAIN_KEYWORDS.strong),
+  moderate: compileKeywordRegexes(DOMAIN_KEYWORDS.moderate),
+  general: compileKeywordRegexes(DOMAIN_KEYWORDS.general),
+};
+
 export function scoreDomainFit(jdText = '') {
-  const text = String(jdText || '').toLowerCase();
+  const text = String(jdText || '');
   let score = 0;
-  for (const kw of DOMAIN_KEYWORDS.strong) if (text.includes(kw)) score += 15;
-  for (const kw of DOMAIN_KEYWORDS.moderate) if (text.includes(kw)) score += 6;
-  for (const kw of DOMAIN_KEYWORDS.general) if (text.includes(kw)) score += 3;
+  for (const { re } of DOMAIN_KEYWORD_REGEXES.strong) if (re.test(text)) score += 15;
+  for (const { re } of DOMAIN_KEYWORD_REGEXES.moderate) if (re.test(text)) score += 6;
+  for (const { re } of DOMAIN_KEYWORD_REGEXES.general) if (re.test(text)) score += 3;
   return clamp0to100(score);
 }
+
+// Flat list of atomic strong+moderate terms (general tier skipped — too
+// generic/broad, e.g. bare language names, to make a good suggested-search
+// default), for seeding Explore's "Roles to find" field with real, tuned
+// vocabulary instead of narrative phrases. general is skipped for THIS
+// export only; scoreDomainFit above still scores it as usual.
+export const SUGGESTED_POSITIVE_TERMS = [...DOMAIN_KEYWORDS.strong, ...DOMAIN_KEYWORDS.moderate];
 
 // Below this, a posting is excluded from the ranked list entirely (near-gate,
 // per the resolved direction) — a perfectly-paid, definitely-hireable-in-India
 // role that's a domain mismatch (e.g. sales) shouldn't surface.
 export const DOMAIN_FIT_GATE_THRESHOLD = 20;
+
+// DOMAIN_FIT_GATE_THRESHOLD (20) is calibrated for full JD paragraph text,
+// where several keyword phrases can appear together. A bare 3-5 word job
+// title can realistically only ever hit one or two keywords — verified live:
+// "Staff Security Engineer" scores 6, well below 20, even though it's
+// obviously on-domain. Applying the JD threshold to title-only text would
+// filter out genuinely relevant postings. This is a deliberately separate,
+// much lower bar for cheap title/location-only triage: any keyword hit at
+// all (score > 0) is real positive signal at this length; zero means no
+// domain-relevant word appeared anywhere in the title/location. Exported so
+// every title-only caller (filter-inbox-by-fit.mjs, web/src/lib/core/scan.ts)
+// shares one definition instead of each re-deriving its own copy.
+export const TITLE_FIT_MIN_SCORE = 1;
 
 // ── Blended rank ─────────────────────────────────────────────────────────────
 
@@ -570,6 +627,21 @@ async function runSelfTest() {
   // (data/pipeline-filtered.md) must still score near zero — confirms this is
   // a real widening, not an accidental "let everything through."
   assert(scoreDomainFit('Account Executive - Enterprise Sales, quota, CRM, customer relationship management') < DOMAIN_FIT_GATE_THRESHOLD, 'a real irrelevant sales title still scores below the gate after broadening');
+
+  // Word-boundary regression (2026-08-08): live-confirmed production false
+  // positives from substring matching — 'ios' hiding inside "biostatistics",
+  // 'driver' matching real logistics job titles. Structural fix must drop
+  // these to EXACTLY zero (not just "below the gate"), since the much lower
+  // TITLE_FIT_MIN_SCORE=1 title-triage gate is what these actually broke.
+  assertEqual(scoreDomainFit('Store Driver'), 0, '"driver" no longer matches inside a real logistics title (live production false positive)');
+  assertEqual(scoreDomainFit('CDL Delivery Truck Driver'), 0, '"driver" no longer matches inside a real CDL/trucking title (live production false positive)');
+  assertEqual(scoreDomainFit('Biostatistics Research Associate'), 0, '"ios" no longer matches hiding inside "biostatistics" (live production false positive, word-boundary fix)');
+  assertEqual(scoreDomainFit('Patriot Freight Group - Regional Driver'), 0, '"iot" does not match hiding inside "patriot" (same structural failure mode as ios/biostatistics, pre-empted before it was ever seen live)');
+  assertEqual(scoreDomainFit('Swift Transportation - CDL Driver'), 0, '"swift" (removed from the general tier) does not resurrect a match on the trucking company Swift Transportation');
+  // Genuinely on-domain titles must still pass after the boundary fix.
+  assert(scoreDomainFit('Kernel Driver Engineer') >= DOMAIN_FIT_GATE_THRESHOLD, '"kernel driver" (the compound phrase actually meant) still matches and clears the gate');
+  assert(scoreDomainFit('Device Driver Development Engineer') >= TITLE_FIT_MIN_SCORE, '"device driver"/"driver development" (the replacement moderate-tier phrases) still match');
+  assert(scoreDomainFit('iOS Security Engineer') >= TITLE_FIT_MIN_SCORE, '"ios" as its own real word (not hiding inside a longer word) still matches');
 
   // Blend rank: domain gate excludes regardless of how good other signals are.
   const gated = blendRank({ domainFit: 5, netEffectiveValueInr: 10_000_000, hireability: 100, heat: 100, layoffRisk: 0 });
