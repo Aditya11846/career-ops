@@ -823,16 +823,27 @@ function analyze() {
     'Laravel', 'Symfony', 'Kotlin', 'Swift', 'C++', 'C#', '.NET', 'MongoDB',
     'MySQL', 'PostgreSQL', 'Redis', 'GraphQL', 'REST', 'AWS', 'GCP', 'Azure',
     'Docker', 'Kubernetes', 'Terraform', 'Supabase', 'Inngest',
+    // Security / systems
+    'Zero Trust', 'ZTNA', 'SASE', 'DLP', 'EDR', 'XDR', 'MDM', 'UEM',
+    'PKI', 'HSM', 'TPM', 'UEFI', 'SELinux', 'AppArmor', 'eBPF',
+    'SIEM', 'SOAR', 'IAM', 'PAM', 'MFA', 'SSO', 'SAML', 'OAuth', 'OIDC',
+    'CrowdStrike', 'SentinelOne', 'Zscaler', 'Okta', 'CyberArk',
+    'TLS', 'mTLS', 'VPN', 'RTOS', 'FIPS', 'FedRAMP',
+    'SOC 2', 'ISO 27001', 'NIST', 'GDPR', 'HIPAA', 'PCI DSS',
   ].map(t => [t.toLowerCase(), t]));
   TECH_CANONICAL.set('node.js', 'Node.js').set('nodejs', 'Node.js');
   TECH_CANONICAL.set('vue.js', 'Vue.js').set('vuejs', 'Vue.js');
+  // Security aliases
+  TECH_CANONICAL.set('zero trust', 'Zero Trust');
+  TECH_CANONICAL.set('pentest', 'penetration testing').set('pen testing', 'penetration testing');
+  TECH_CANONICAL.set('ebpf', 'eBPF').set('mtls', 'mTLS');
   const stackGapCounts = new Map();
   for (const e of enriched) {
     if (e.outcome !== 'negative' && e.outcome !== 'self_filtered') continue;
     if (!e.report?.gaps) continue;
     for (const gap of e.report.gaps) {
       // Extract tech keywords from gap descriptions
-      const techs = gap.description.match(/\b(JavaScript|TypeScript|Python|Ruby|Java|Go|Rust|Node\.?js|React Native|React|Angular|Vue\.?js|Django|Flask|Rails|PHP|Laravel|Symfony|Kotlin|Swift|C\+\+|C#|\.NET|MongoDB|MySQL|PostgreSQL|Redis|GraphQL|REST|AWS|GCP|Azure|Docker|Kubernetes|Terraform|Supabase|Inngest)\b/gi);
+      const techs = gap.description.match(/\b(JavaScript|TypeScript|Python|Ruby|Java|Go|Rust|Node\.?js|React Native|React|Angular|Vue\.?js|Django|Flask|Rails|PHP|Laravel|Symfony|Kotlin|Swift|C\+\+|C#|\.NET|MongoDB|MySQL|PostgreSQL|Redis|GraphQL|REST|AWS|GCP|Azure|Docker|Kubernetes|Terraform|Supabase|Inngest|Zero Trust|ZTNA|SASE|DLP|EDR|XDR|MDM|UEM|PKI|HSM|TPM|UEFI|SELinux|AppArmor|eBPF|SIEM|SOAR|IAM|PAM|MFA|SSO|SAML|OAuth|OIDC|CrowdStrike|SentinelOne|Zscaler|Okta|CyberArk|TLS|mTLS|VPN|RTOS|FIPS|FedRAMP|SOC 2|ISO 27001|NIST|GDPR|HIPAA|PCI DSS|pen testing|penetration testing)\b/gi);
       if (techs) {
         for (const tech of techs) {
           const normalized = TECH_CANONICAL.get(tech.toLowerCase()) || tech;

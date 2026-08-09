@@ -151,7 +151,7 @@ async function main() {
   const thresholds = profile.auto_apply_thresholds || { high: 4.5, medium: 4.0 };
   const band = scoreBand(score, thresholds);
 
-  const relocation = checkRelocationGate({ company, role, location, url, reportRef });
+  const relocation = checkRelocationGate({ company, role, location, url, reportRef }, profile);
   if (relocation.blocked) {
     console.log(JSON.stringify({ decision: 'paused', reason: 'relocation', entry: relocation.entry }, null, 2));
     return;

@@ -72,14 +72,34 @@ const SKILL_TOKENS = [
   'Computer Vision', 'NLP',
   // Analytics / enterprise
   'Tableau', 'Power BI', 'Looker', 'Salesforce', 'SAP',
+  // Security / systems (endpoint, network, kernel, embedded)
+  'Zero Trust', 'ZTNA', 'SASE', 'DLP', 'EDR', 'XDR', 'MDM', 'UEM',
+  'PKI', 'HSM', 'TPM', 'Secure Boot', 'UEFI', 'BitLocker', 'FileVault',
+  'SELinux', 'AppArmor', 'eBPF',
+  'SIEM', 'SOAR', 'SOC', 'MITRE ATT&CK', 'CVE', 'CVSS',
+  'IAM', 'PAM', 'MFA', 'SSO', 'SAML', 'OAuth', 'OIDC',
+  'Symantec', 'Broadcom', 'CrowdStrike', 'SentinelOne', 'Carbon Black',
+  'Palo Alto', 'Zscaler', 'Okta', 'CyberArk',
+  'penetration testing', 'pen testing', 'red team', 'blue team', 'purple team',
+  'threat modeling', 'threat hunting', 'incident response', 'forensics',
+  'vulnerability management', 'patch management',
+  'encryption', 'cryptography', 'TLS', 'mTLS', 'AES', 'RSA',
+  'firewall', 'IDS', 'IPS', 'VPN', 'SD-WAN',
+  'kernel', 'firmware', 'embedded', 'RTOS', 'hypervisor',
+  'FIPS', 'FedRAMP', 'SOC 2', 'ISO 27001', 'NIST', 'CIS Benchmark',
+  'GDPR', 'HIPAA', 'PCI DSS',
 ];
 
 // \b fails at symbol edges (\bC\+\+\b needs a word char AFTER the +, \b\.NET
 // needs one BEFORE the dot), so C++/C#/.NET would never match standalone.
 // (?<!\w)/(?!\w) are equivalent to \b for word-char edges and correct for
 // symbol edges.
+// Longest-first: a plain alternation matches the first alternative that
+// fits at a position, not the longest overall match — without this sort,
+// a short token that's a prefix of a longer phrase (e.g. "SOC" vs "SOC 2")
+// wins and the phrase never gets a chance to match.
 const SKILL_PATTERN = new RegExp(
-  '(?<!\\w)(?:' + SKILL_TOKENS.join('|') + ')(?!\\w)',
+  '(?<!\\w)(?:' + [...SKILL_TOKENS].sort((a, b) => b.length - a.length).join('|') + ')(?!\\w)',
   'gi'
 );
 
@@ -128,6 +148,67 @@ const CANONICAL = {
   'c++': 'C++', 'c#': 'C#', '.net': '.NET',
   'nlp': 'NLP', 'rag': 'RAG', 'sql': 'SQL', 'aws': 'AWS', 'gcp': 'GCP',
   'grpc': 'gRPC', 'dbt': 'dbt', 'mlops': 'MLOps', 'mlflow': 'MLflow',
+  // Security / systems aliases
+  'zero trust': 'Zero Trust',
+  'ztna': 'ZTNA',
+  'sase': 'SASE',
+  'dlp': 'DLP',
+  'edr': 'EDR',
+  'xdr': 'XDR',
+  'mdm': 'MDM',
+  'uem': 'UEM',
+  'pki': 'PKI',
+  'hsm': 'HSM',
+  'tpm': 'TPM',
+  'secure boot': 'Secure Boot',
+  'uefi': 'UEFI',
+  'bitlocker': 'BitLocker',
+  'filevault': 'FileVault',
+  'selinux': 'SELinux',
+  'apparmor': 'AppArmor',
+  'ebpf': 'eBPF',
+  'siem': 'SIEM',
+  'soar': 'SOAR',
+  'soc': 'SOC',
+  'mitre att&ck': 'MITRE ATT&CK',
+  'cve': 'CVE',
+  'cvss': 'CVSS',
+  'iam': 'IAM',
+  'pam': 'PAM',
+  'mfa': 'MFA',
+  'sso': 'SSO',
+  'saml': 'SAML',
+  'oauth': 'OAuth',
+  'oidc': 'OIDC',
+  'palo alto': 'Palo Alto',
+  'pen testing': 'penetration testing',
+  'pentest': 'penetration testing',
+  'red team': 'red team',
+  'blue team': 'blue team',
+  'purple team': 'purple team',
+  'threat modeling': 'threat modeling',
+  'threat hunting': 'threat hunting',
+  'incident response': 'incident response',
+  'vulnerability management': 'vulnerability management',
+  'patch management': 'patch management',
+  'tls': 'TLS',
+  'mtls': 'mTLS',
+  'aes': 'AES',
+  'rsa': 'RSA',
+  'ids': 'IDS',
+  'ips': 'IPS',
+  'vpn': 'VPN',
+  'sd-wan': 'SD-WAN',
+  'rtos': 'RTOS',
+  'fips': 'FIPS',
+  'fedramp': 'FedRAMP',
+  'soc 2': 'SOC 2',
+  'iso 27001': 'ISO 27001',
+  'nist': 'NIST',
+  'cis benchmark': 'CIS Benchmark',
+  'gdpr': 'GDPR',
+  'hipaa': 'HIPAA',
+  'pci dss': 'PCI DSS',
 };
 
 function canonicalize(token) {
