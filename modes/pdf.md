@@ -15,7 +15,7 @@
    - Rest of the world → `a4`
 7. Detect role archetype → adapt framing
 8. Build an internal recruiter-side risk map from the JD using `modes/heuristics/recruiter-side.md`: likely doubts, matching evidence, and which document section should address each doubt
-9. Rewrite Professional Summary by injecting JD keywords + exit narrative bridge ("Built and sold a business. Now applying systems thinking to [JD domain].")
+9. Rewrite Professional Summary by injecting JD keywords; if `config/profile.yml` → `narrative.exit_story` is non-empty, weave it in as a positioning bridge — otherwise write a direct summary from the candidate's actual background without an exit narrative
 10. Select top 3-4 most relevant projects for the job
 11. Reorder experience bullets by JD relevance and by the risk map: strongest matching evidence first
 12. Build competency grid from JD requirements (6-8 keyword phrases), prioritizing `existing` and `supportedByResume` skills from Step 4 — never a `gap` skill

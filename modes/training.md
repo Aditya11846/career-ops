@@ -19,9 +19,6 @@ For each course/cert the candidate asks about, evaluate 6 dimensions:
 
 ## Priority
 
-Training that improves credibility in "production-grade AI":
-1. LLM evaluation and testing
-2. Observability and monitoring
-3. Cost/reliability trade-offs
-4. AI governance and safety
-5. Enterprise AI architecture
+Training that improves credibility in the candidate's target domain (read `modes/_profile.md`'s "Your Target Roles" table to identify which domain — do not hardcode a domain here):
+- Prioritize courses and certifications that close the gaps surfaced by `node upskill.mjs --summary`
+- Within each archetype's domain, favour credentials recognised by the hiring companies in the pipeline (check vendor cert pages and JD "preferred" sections)

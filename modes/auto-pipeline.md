@@ -76,7 +76,7 @@ If the final score is >= 4.5, generate a draft of responses for the application 
 **Position: "I'm choosing you."** The candidate has options and is choosing this company for specific reasons.
 
 **Tone rules:**
-- **Confident without arrogance**: "I've spent the past year building production AI agent systems — your role is where I want to apply that experience next"
+- **Confident without arrogance**: lead with a real proof point from the candidate's background (read `cv.md`) that maps directly to the JD — do not use a generic AI/founder template here
 - **Selective without arrogance**: "I've been intentional about finding a team where I can contribute meaningfully from day one"
 - **Specific and concrete**: Always reference something REAL from the JD or the company, and something REAL from the candidate's experience
 - **Direct, without fluff**: 2-4 sentences per response. No "I'm passionate about..." or "I would love the opportunity to..."
@@ -85,7 +85,7 @@ If the final score is >= 4.5, generate a draft of responses for the application 
 **Framework per question:**
 - **Why this role?** → "Your [specific thing] maps directly to [specific thing I built]."
 - **Why this company?** → Mention something specific about the company. "I've been using [product] for [time/purpose]."
-- **Relevant experience?** → A quantified proof point. "Built [X] that [metric]. Sold the company in 2025."
+- **Relevant experience?** → A quantified proof point from `cv.md` — the strongest matching achievement, in one sentence
 - **Good fit?** → "I sit at the intersection of [A] and [B], which is exactly where this role lives."
 - **How did you hear?** → Honest: "Found through [portal/scan], evaluated against my criteria, and it scored highest."
 

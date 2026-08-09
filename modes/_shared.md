@@ -146,18 +146,22 @@ When a JD publishes a salary figure, distinguish advertised range, likely guaran
 
 ## Archetype Detection
 
-Classify every offer into one of these types (or hybrid of 2):
+Classify every offer into one of the archetypes (or hybrid of 2) listed in
+`modes/_profile.md`'s "Your Target Roles" table — read that table's
+**Archetype** column for the taxonomy and its **Thematic axes** column as the
+JD-signal keywords for each. This section deliberately does NOT hardcode
+archetype names or keywords: they are user-specific personalization content
+per the Data Contract (AGENTS.md), and belong in `_profile.md`, not here.
+Hardcoding a taxonomy here previously caused every offer to get force-fit
+into archetypes from a different user's search (#observed 2026-08-10) — never
+reintroduce that.
 
-| Archetype | Key signals in JD |
-|-----------|-------------------|
-| AI Platform / LLMOps | "observability", "evals", "pipelines", "monitoring", "reliability" |
-| Agentic / Automation | "agent", "HITL", "orchestration", "workflow", "multi-agent" |
-| Technical AI PM | "PRD", "roadmap", "discovery", "stakeholder", "product manager" |
-| AI Solutions Architect | "architecture", "enterprise", "integration", "design", "systems" |
-| AI Forward Deployed | "client-facing", "deploy", "prototype", "fast delivery", "field" |
-| AI Transformation | "change management", "adoption", "enablement", "transformation" |
+If `_profile.md`'s Target Roles table is missing or empty, fall back to a
+plain-language classification: describe the role's focus, function, and
+domain directly from the JD, without forcing it into a named archetype.
 
-After detecting archetype, read `modes/_profile.md` for the user's specific framing and proof points for that archetype.
+After detecting archetype, read `modes/_profile.md`'s "Your Adaptive Framing"
+table for the user's specific framing and proof points for that archetype.
 
 ## Global Rules
 

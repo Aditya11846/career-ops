@@ -39,7 +39,7 @@ If deeper company research is useful, recommend running `/career-ops deep` separ
 
 ## Step 0 — Archetype Detection
 
-Classify the job into one of the 6 archetypes (see `_shared.md`). If it is a hybrid, indicate the 2 closest ones. This determines:
+Classify the job into one of the archetypes defined in `modes/_profile.md`'s "Your Target Roles" table. If it is a hybrid, indicate the 2 closest ones. This determines:
 - Which proof points to prioritize in block B
 - How to rewrite the summary in block E
 - Which STAR stories to prepare in block F
@@ -47,8 +47,8 @@ Classify the job into one of the 6 archetypes (see `_shared.md`). If it is a hyb
 ## Block A — Role Summary
 
 Table with:
-- Archetype detected
-- Domain (platform/agentic/LLMOps/ML/enterprise)
+- Archetype detected (from `modes/_profile.md`'s "Your Target Roles" table)
+- Domain (derived from the JD — do not use a fixed list; describe what the role actually does)
 - Function (build/consult/manage/deploy)
 - Seniority
 - Remote (full/hybrid/onsite)
@@ -73,7 +73,7 @@ The flag is an additive line only — Block B's existing content stays unchanged
 
 ### Geo-restriction check (2026-08-02)
 
-A separate axis from the geo-mismatch check above — that one catches "remote" contradicted by an attendance requirement; this one catches "remote" that's real but secretly scoped to one country, which is common enough that it's likely cost real search time before this check existed. The candidate is remote-only, based in India (see `config/profile.yml` → `location`; hybrid based in Pune is separately acceptable, see that file's note).
+A separate axis from the geo-mismatch check above — that one catches "remote" contradicted by an attendance requirement; this one catches "remote" that's real but secretly scoped to one country, which is common enough that it's likely cost real search time before this check existed. Read the candidate's `config/profile.yml` → `location` block for their country, city, and onsite availability policy — do not hardcode location facts here.
 
 While reading the JD, actively look for (this is a careful read, not a keyword scan — `compute-fit.mjs`'s `geo_evidence` field is a fast approximation, not a substitute):
 - Explicit citizenship/work-authorization requirements: "must be a US citizen," "authorized to work in [country] without sponsorship," "not eligible for visa sponsorship."
@@ -91,12 +91,11 @@ Cross-check against `compute-fit.mjs --score`'s `geo_eligibility`/`geo_evidence`
 Read `cv.md`. Create a table with each JD requirement mapped to exact lines in the CV.
 
 **Adapted to the archetype:**
-- If FDE → prioritize delivery speed and client-facing proof points
-- If SA → prioritize system design and integrations
-- If PM → prioritize product discovery and metrics
-- If LLMOps → prioritize evals, observability, pipelines
-- If Agentic → prioritize multi-agent, HITL, orchestration
-- If Transformation → prioritize change management, adoption, scaling
+Read the row for the archetype detected in Step 0 from `modes/_profile.md`'s
+"Your Adaptive Framing" table and prioritize the proof points/emphasis it
+lists. Do not hardcode per-archetype rules here — the archetype list itself
+is user-specific and lives only in `_profile.md` (see `_shared.md`'s
+Archetype Detection section).
 
 **Gaps** section with mitigation strategy for each. For each gap:
 1. Is it a hard blocker or a nice-to-have?
@@ -107,7 +106,7 @@ Read `cv.md`. Create a table with each JD requirement mapped to exact lines in t
 ## Block C — Level and Strategy
 
 1. **Level detected** in the JD vs **candidate's natural level for that archetype**
-2. **"Sell senior without lying" plan**: specific phrases adapted to the archetype, concrete achievements to highlight, how to position founder experience as an advantage
+2. **"Sell senior without lying" plan**: specific phrases adapted to the archetype, concrete achievements to highlight; if `config/profile.yml` → `narrative.exit_story` is non-empty, weave it in as a positioning bridge — otherwise skip this framing entirely
 3. **"If they downlevel me" plan**: accept if compensation is fair, negotiate 6-month review, clear promotion criteria
 
 ## Block D — Comp and Demand
@@ -210,12 +209,7 @@ The **Reflection** column captures what was learned or what would be done differ
 **Story Bank:** If `interview-prep/story-bank.md` exists, check if any of these stories are already there. If not, append new ones. Over time this builds a reusable bank of 5-10 master stories that can be adapted to any interview question.
 
 **Selected and framed according to the archetype:**
-- FDE → emphasize delivery speed and client-facing
-- SA → emphasize architectural decisions
-- PM → emphasize discovery and trade-offs
-- LLMOps → emphasize metrics, evals, production hardening
-- Agentic → emphasize orchestration, error handling, HITL
-- Transformation → emphasize adoption, organizational change
+Read the detected archetype's row from `modes/_profile.md`'s "Your Adaptive Framing" table and apply the emphasis axes listed there. Do not hardcode per-archetype rules here — the framing is user-specific and lives only in `_profile.md`.
 
 Also include:
 - 1 recommended case study (which of their projects to present and how)

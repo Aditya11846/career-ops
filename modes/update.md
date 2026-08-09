@@ -54,8 +54,8 @@ Before applying, check if the update might affect the user's customizations:
 
 1. **Read `modes/_profile.md`** (if it exists)
 2. **Diff `modes/_shared.md`**: Run `git diff HEAD..FETCH_HEAD -- modes/_shared.md`
-3. **Check for archetype changes**: If `_shared.md` has changes in the "Archetype Detection" section, and `_profile.md` references archetype names, warn the user:
-   > "⚠️ The scoring system or archetypes were updated. Your customizations in `_profile.md` may reference outdated archetype names. I'll review them after the update."
+3. **Check for archetype changes**: If `_shared.md` changed, and `_profile.md`'s "Your Target Roles" table exists, warn the user:
+   > "⚠️ The scoring system was updated. Your archetype definitions in `_profile.md` may need a quick review — I'll check after the update."
 4. **Check for scoring changes**: If the "Scoring System" section changed, note it:
    > "ℹ️ The scoring system was updated. Scores in future evaluations may differ slightly from previous ones."
 5. **Check for new mode files**: If new modes were added (files in `modes/` that don't exist locally), mention them:
@@ -79,19 +79,12 @@ If yes:
    - If the command exits with a non-zero code, treat validation as failed. Show the captured output and offer:
      > "⚠️ Validation failed after update. Want me to show the full error, or roll back with `/career-ops update rollback`?"
    - Stop the flow here if validation failed — do not run reconciliation or show the success message.
-7. If Step 3 flagged archetype/scoring changes, reconcile `modes/_profile.md` against the new `modes/_shared.md`:
-   - Read both the pre-update version (`git show $PRE_UPDATE_REF:modes/_shared.md`) and the post-update version of `modes/_shared.md`.
-   - Extract the canonical archetype identifiers from each version (archetype headings/definitions, plus any slug/alias fields).
-   - Read `modes/_profile.md` and look for tokens that match archetype names (inline text, Markdown links, YAML keys, code spans).
-   - Classify each reference:
-     - **Unchanged**: exact match in the new `_shared.md` → no action.
-     - **Renamed**: no exact match, but a single strong fuzzy match in the new `_shared.md` (e.g. Levenshtein similarity ≥ 0.7) → offer to rename.
-     - **Removed**: no match at all → offer to delete or replace.
-   - When a rename or removal is detected, ask before editing:
-     - For renames:
-       > "Your _profile.md references archetype '{old_name}' which was renamed to '{new_name}'. Want me to update it?"
-     - For removals:
-       > "Your _profile.md references archetype '{old_name}' which was removed in the new _shared.md. Want me to delete the reference or replace it with another archetype?"
+7. If Step 3 flagged archetype/scoring changes, reconcile `modes/_profile.md` with the updated system:
+   - Read `modes/_profile.md`'s "Your Target Roles" table — this is the canonical archetype list; it lives entirely in `_profile.md`, not in `_shared.md`.
+   - Read the diff of `modes/_shared.md` between `$PRE_UPDATE_REF` and the new version to check whether any **structural hooks** (section names or table column names) that `_profile.md` depends on have changed.
+   - If a structural hook was renamed (e.g. the "Your Adaptive Framing" table heading changed), ask before editing:
+     > "The update renamed a section that `_profile.md` references: '{old}' → '{new}'. Want me to update your `_profile.md` to match?"
+   - If nothing structural changed, no edit is needed — the user's archetype names are entirely their own and are unaffected by `_shared.md` updates.
 8. Show final status:
    > "✅ Updated to v{version}. Run `node doctor.mjs` anytime to verify setup."
 
@@ -113,7 +106,7 @@ If the user says "rollback" or runs `/career-ops update rollback`:
 - NEVER auto-modify User Layer files during update (cv.md, config/profile.yml, data/, reports/, output/, interview-prep/, jds/, article-digest.md, portals.yml)
 - `modes/_profile.md` is User Layer too: the compatibility check in Step 3 reads it strictly read-only
 - Exception: `modes/_profile.md` may be edited **only** in Step 4.7, and **only** after the user explicitly confirms each individual rename/removal. Never batch-edit without per-change consent.
-- User-specific customizations (archetypes, scoring weights, narrative) belong in `modes/_profile.md` or `config/profile.yml`, never in `modes/_shared.md`
+- User-specific customizations (archetypes, scoring weights, narrative) belong in `modes/_profile.md` or `config/profile.yml`. `modes/_shared.md` is system-layer — it must never define a hardcoded taxonomy; it defers to `_profile.md`'s "Your Target Roles" and "Your Adaptive Framing" tables.
 - CLAUDE.md's local additions (everything after the two-line `@AGENTS.md` header) MUST be saved before apply and restored immediately after — on both the success AND failure path (Step 4.2, Step 4.4). `update-system.mjs apply` resets CLAUDE.md before it can fail partway through, so a failed apply still needs the restore. `apply` has no awareness of this content and will silently discard it otherwise.
 - If anything goes wrong, tell the user to run `node update-system.mjs rollback`
 - Keep the output concise — users don't want walls of text during an update

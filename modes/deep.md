@@ -7,14 +7,14 @@ Generate a structured prompt for Perplexity/Claude/ChatGPT with 6 axes:
 
 Context: I am evaluating a candidacy for [role] at [company]. I need actionable information for the interview.
 
-### 1. AI Strategy
-- What products/features use AI/ML?
-- What is their AI stack? (models, infrastructure, tools)
-- Do they have an engineering blog? What do they publish?
-- What papers or talks have they presented on AI?
+### 1. Domain Strategy
+- What is the company's core technical domain (read the JD and company overview — do not assume AI/ML)?
+- What does their technical stack look like in that domain?
+- Do they have an engineering blog, security advisories, or published research? What do they publish?
+- What recent talks, papers, or patents have they produced?
 
 ### 2. Recent moves (last 6 months)
-- Relevant hires in AI/ML/product?
+- Relevant hires in the candidate's target domain (security, systems, engineering leadership — read `modes/_profile.md`)?
 - Acquisitions or partnerships?
 - Product launches or pivots?
 - Funding rounds or leadership changes?

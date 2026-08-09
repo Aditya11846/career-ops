@@ -311,7 +311,7 @@ You paste a job URL or description
         │
         ▼
 ┌──────────────────┐
-│  Archetype       │  Classifies: LLMOps / Agentic / PM / SA / FDE / Transformation
+│  Archetype       │  Classifies into your target roles (defined in modes/_profile.md)
 │  Detection       │
 └────────┬─────────┘
          │
