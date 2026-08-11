@@ -1,5 +1,9 @@
 {
   "mcpServers": {
+    "gitnexus": {
+      "type": "http",
+      "url": "http://localhost:4747/api/mcp"
+    },
     "playwright": {
       "type": "stdio",
       "command": "npx",
