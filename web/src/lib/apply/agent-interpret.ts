@@ -13,11 +13,11 @@ import type { ApplyField } from "./extract";
 // the LLM interprets, never blind-clicks. Robust to any markup change.
 // ─────────────────────────────────────────────────────────────────────────────
 
-type Cand = { n: number; tag: string; type: string; name: string; placeholder: string; aria: string; req: boolean; ctx: string; opts: string[] };
+export type Cand = { n: number; tag: string; type: string; name: string; placeholder: string; aria: string; req: boolean; ctx: string; opts: string[] };
 
 /** Tag + capture every interactive control in the frame as a browser_snapshot-style
  *  text list the LLM can reason over. Radio groups collapse to one candidate. */
-async function captureCandidates(frame: Frame): Promise<Cand[]> {
+export async function captureCandidates(frame: Frame): Promise<Cand[]> {
   return frame.evaluate(() => {
     const clean = (s: string | null | undefined) => (s || "").replace(/\s+/g, " ").trim().slice(0, 220);
     const cands: Cand[] = [];
@@ -79,7 +79,7 @@ Return ONLY a JSON array, no prose, no code fence:
 [{"n":0,"skip":false,"label":"First Name","type":"text","options":[],"required":true}, ...]`;
 }
 
-function runPlanner(binPath: string, isClaude: boolean, argsFor: (p: string) => string[], prompt: string): Promise<string> {
+export function runPlanner(binPath: string, isClaude: boolean, argsFor: (p: string) => string[], prompt: string): Promise<string> {
   const args = isClaude ? ["-p", prompt, "--permission-mode", "acceptEdits", "--strict-mcp-config", "--allowedTools", "Read", "--disallowedTools", "Bash,Write,Edit,NotebookEdit,Task,WebFetch,WebSearch"] : argsFor(prompt);
   return new Promise((resolve) => {
     const child = spawn(binPath, args, { cwd: careerOpsRoot(), env: process.env, stdio: ["ignore", "pipe", "pipe"] });

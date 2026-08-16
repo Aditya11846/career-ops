@@ -144,3 +144,43 @@ export function findCrossListings(offers, historyRows, opts = {}) {
   }
   return matches.sort((a, b) => b.score - a.score);
 }
+
+/**
+ * Group offers whose JD fingerprints are near-identical (SimHash distance within
+ * the cross-listing threshold) — the intra-run half of scan-time dedup (Smart 5):
+ * the same posting listed on two ATS in one scan yields ONE cluster. Anchor-based:
+ * each offer joins the first cluster whose anchor it matches (near-verbatim JD
+ * bodies mean anchor-based grouping is exactly as good as full transitive closure
+ * for real duplicates). Offers without a usable fingerprint form singleton
+ * clusters and are never dropped.
+ *
+ * Pure function — no IO, no date access (kept testable / deterministic).
+ *
+ * @param {Array<{fingerprint?: string}>} offers
+ * @param {{threshold?: number}} [opts]
+ * @returns {number[][]} Clusters of indices into `offers`; singleton clusters
+ *                       included so callers can treat "length > 1" as "duplicate
+ *                       group" without an extra membership check.
+ */
+export function clusterByFingerprint(offers, { threshold = CROSSLIST_THRESHOLD } = {}) {
+  const clusters = [];
+  const assigned = new Set();
+  for (let i = 0; i < offers.length; i++) {
+    if (assigned.has(i)) continue;
+    assigned.add(i);
+    const cluster = [i];
+    const anchor = offers[i]?.fingerprint;
+    if (anchor && /^[0-9a-f]{16}$/.test(anchor)) {
+      for (let j = i + 1; j < offers.length; j++) {
+        if (assigned.has(j)) continue;
+        const other = offers[j]?.fingerprint;
+        if (other && similarity(anchor, other) >= threshold) {
+          cluster.push(j);
+          assigned.add(j);
+        }
+      }
+    }
+    clusters.push(cluster);
+  }
+  return clusters;
+}

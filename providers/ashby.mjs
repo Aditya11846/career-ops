@@ -147,6 +147,7 @@ function formatLocation(j) {
 /** @type {Provider} */
 export default {
   id: 'ashby',
+  maxConcurrency: 4,
 
   detect(entry) {
     try {

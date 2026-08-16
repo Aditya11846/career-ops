@@ -77,18 +77,22 @@ Read `spend_tier` from `config/profile.yml` (see `modes/_shared.md` -- Spend Tie
 
 Pending lines are variable-width. The rawest form is a bare pasted URL,
 `- [ ] {url}` (1 column) — what you drop into the inbox by hand. Scanner-written
-entries add `| {company} | {title}` (3 columns) plus two optional trailing
-columns: `| {location}` (4th) and `| {compensation}` (5th). The scanner fills the
-trailing columns only when the ATS exposes them, so 1-, 3-, 4-, and 5-column rows
-are all valid — `{url} | {company} | {title} | {location} | {compensation}` is the
-maximum (canonical) shape, not the only one. The columns are positional, so a row
-carrying compensation always includes the location cell (empty if unknown); a row
-with only a location stays 4 columns. Existing shorter rows remain valid and are
-read as having empty values for the missing trailing columns.
+entries add `| {company} | {title}` (3 columns) plus one optional trailing
+column: `| {location}` (4th). The scanner fills it only when the ATS exposes one,
+so 1-, 3-, and 4-column rows are all valid — `{url} | {company} | {title} |
+{location}` is the maximum (canonical) shape, not the only one. Existing 5-column
+rows from before the salary move are read fine (the trailing cells are ignored).
+Rows with only a location stay 4 columns; shorter rows remain valid and read as
+having empty values for missing trailing columns.
+
+Compensation is NOT positional — since scan.mjs Smart 2 it ships as the
+`salary:` labeled segment below (a positional 5th column forced a spurious empty
+location cell when only salary was present, and no reader consumed it). Location
+remains the only optional trailing positional cell.
 
 Beyond the positional cells, rows may carry optional **labeled** segments —
 `| {label}: {value}` — that ride on any row shape (bare URL, 3-, 4-, or 5-column),
-because the `{label}:` prefix identifies them regardless of column position. Three
+because the `{label}:` prefix identifies them regardless of column position. Five
 are defined:
 
 - `| posted: {YYYY-MM-DD}` — the posting date, when the provider's API exposed one
@@ -106,12 +110,23 @@ are defined:
   a low score as a ghost/scam-posting warning and weigh it in Block G legitimacy
   before spending an evaluation. The same score + flags are also written to the
   trailing columns of `data/scan-history.tsv`.
+- `| salary: {min}-{max} {CURRENCY}` — the advertised range from the provider's
+  list call when it exposed one (`offer.salary`), e.g. `| salary: 120000-160000
+  USD`. Single-bound or currency-less ranges degrade gracefully
+  (`| salary: 90000`, `| salary: 80000-100000`). Providers that don't expose
+  salary on list calls omit the segment — a figure is never fabricated.
+- `| relevance: {0-3}` — scan.mjs Smart 1's soft scan-time relevance signal:
+  +1 title keyword matches a target-role keyword, +1 company is on the enabled
+  watchlist, +1 seniority tier matches the profile's target band. 0 is valid and
+  emitted (unlike `salary:`/`trust:`, the tagger always runs). Used by
+  scan-and-process.mjs to drain the pipeline most-promising-first.
 - `| note: {text}` — a free-text ranking signal an importer attached to the offer
   (`- [ ] {url} | {company} | {title} | note: curated shortlist` is valid). The
   deterministic scanner never sets it.
 
-When more than one is present the order is `posted:` → `trust:` → `note:`. Treat
-them as hints when triaging; none changes how you process the URL.
+When more than one is present the order is `posted:` → `trust:` → `salary:` →
+`relevance:` → `note:`. Treat them as hints when triaging; none changes how you
+process the URL.
 
 ## Intelligent JD detection from URL
 

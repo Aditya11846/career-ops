@@ -44,9 +44,27 @@ function toEpochMs(value) {
   return Number.isNaN(parsed) ? undefined : parsed;
 }
 
+// Greenhouse's v1 jobs list can carry per-posting salary_min/max/currency on
+// SOME boards (most omit them entirely). Parse defensively — absent fields
+// return undefined ("providers without omit"), never a fabricated range. Values
+// are annualized by Greenhouse when present; null for a missing end.
+function parseSalary(j) {
+  const clean = (v) => {
+    if (v == null || v === '') return null;
+    const n = Number(v);
+    return Number.isFinite(n) && n >= 0 ? n : null;
+  };
+  const min = clean(j.salary_min);
+  const max = clean(j.salary_max);
+  if (min == null && max == null) return undefined;
+  const currency = typeof j.salary_currency === 'string' ? j.salary_currency.trim().toUpperCase() : '';
+  return { min, max, currency };
+}
+
 /** @type {Provider} */
 export default {
   id: 'greenhouse',
+  maxConcurrency: 5,
 
   detect(entry) {
     try {
@@ -63,13 +81,16 @@ export default {
     assertGreenhouseUrl(apiUrl);
     // redirect:'error' prevents SSRF via server-side redirects; combined with
     // assertGreenhouseUrl above it guarantees the final hostname stays in the allowlist.
-    const json = /** @type {any} */ (await ctx.fetchJson(apiUrl, { redirect: 'error' }));
+    // fetchJsonRetry: the boards API rate-limits under load — the shared
+    // backoff+jitter retry (Smart 4) absorbs transient 429/5xx without noise.
+    const json = /** @type {any} */ (await ctx.fetchJsonRetry(apiUrl, { redirect: 'error' }));
     const jobs = Array.isArray(json?.jobs) ? json.jobs : [];
     return jobs.filter(/** @param {any} j */ j => j.absolute_url).map(/** @param {any} j */ j => ({
       title: j.title || '',
       url: j.absolute_url,
       company: entry.name,
       location: j.location?.name || '',
+      salary: parseSalary(j),
       postedAt: toEpochMs(j.first_published),
     }));
   },

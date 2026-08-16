@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import { ExplorerView } from "@/components/explore/explorer-view";
+import { ScanWatchlist } from "@/components/explore/scan-watchlist";
 import { seedExploreFilters } from "@/lib/core/portals";
 import { readInbox, readApplications, careerOpsRoot } from "@/lib/career-ops";
 import { DEFAULT_FILTERS } from "@/lib/explore";
@@ -22,6 +23,12 @@ export default function ExplorePage() {
     /* ignore */
   }
   return (
-    <ExplorerView seed={seed} inboxSnapshot={readInbox()} appsSnapshot={readApplications()} rootExists={rootExists} />
+    <div className="mx-auto max-w-6xl space-y-4 p-4">
+      {/* 1A autonomy trigger A — watchlist fire-hose scan (scan.mjs), the
+          sibling the Discover button never ran (it only launches scan-ats-full
+          discovery). New offers land in data/pipeline.md for the eval layer. */}
+      <ScanWatchlist />
+      <ExplorerView seed={seed} inboxSnapshot={readInbox()} appsSnapshot={readApplications()} rootExists={rootExists} />
+    </div>
   );
 }

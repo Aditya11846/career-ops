@@ -43,9 +43,28 @@ function resolveApiUrl(entry) {
   return `https://api.${host[1]}/v0/postings/${slug}`;
 }
 
+// Lever's v0 postings list can carry a salaryRange object on some postings
+// (most omit it — no-op when absent, never fabricated). min/max are in the
+// listed currency.
+function parseSalary(j) {
+  const r = j?.salaryRange;
+  if (!r || typeof r !== 'object') return undefined;
+  const clean = (v) => {
+    if (v == null || v === '') return null;
+    const n = Number(v);
+    return Number.isFinite(n) && n >= 0 ? n : null;
+  };
+  const min = clean(r.min);
+  const max = clean(r.max);
+  if (min == null && max == null) return undefined;
+  const currency = typeof r.currency === 'string' ? r.currency.trim().toUpperCase() : '';
+  return { min, max, currency };
+}
+
 /** @type {Provider} */
 export default {
   id: 'lever',
+  maxConcurrency: 5,
 
   detect(entry) {
     try {
@@ -60,13 +79,16 @@ export default {
     const apiUrl = resolveApiUrl(entry);
     if (!apiUrl) throw new Error(`lever: cannot derive API URL for ${entry.name}`);
     assertLeverUrl(apiUrl);
-    const json = await ctx.fetchJson(apiUrl, { redirect: 'error' });
+    // fetchJsonRetry: Lever's postings API rate-limits under load — the shared
+    // backoff+jitter retry (Smart 4) absorbs transient 429/5xx without noise.
+    const json = await ctx.fetchJsonRetry(apiUrl, { redirect: 'error' });
     if (!Array.isArray(json)) return [];
     return json.map(j => ({
       title: j.text || '',
       url: j.hostedUrl || '',
       company: entry.name,
       location: j.categories?.location || '',
+      salary: parseSalary(j),
       // Lever's v0 postings list ships the full description for free (same
       // payload, no per-job request) — enables scan.mjs content_filter.
       description: typeof j.descriptionPlain === 'string' ? j.descriptionPlain : '',

@@ -35,6 +35,22 @@
  *                                   'invalid_url', 'suspicious_domain').
  * @property {'high'|'medium'|'low'} [trustLevel] Classification derived from
  *                                                 trustScore.
+ * @property {{min: number|null, max: number|null, currency: string}} [salary]
+ *                               Optional advertised salary range straight from
+ *                               the provider's list payload — never synthesized.
+ *                               min/max are annualized when the source reports an
+ *                               interval (ashby annualizes via INTERVAL_MULTIPLIERS);
+ *                               null for a missing end. The property is OMITTED
+ *                               (not null) when the provider doesn't expose
+ *                               compensation on its list call ("providers without
+ *                               omit"). Consumed by scan.mjs's salary_filter, the
+ *                               `salary:` pipeline tag, and scan-and-process.
+ * @property {number} [relevance] 0-3 soft relevance signal assigned by scan.mjs
+ *                               at scan time (Smart 1): +1 title matches a
+ *                               profile target-role domain keyword, +1 company is
+ *                               in the enabled watchlist, +1 seniority tier
+ *                               matches the profile target. Informational — the
+ *                               scanner never filters on it.
  */
 
 /**
@@ -95,6 +111,17 @@
  * @property {('http')} transport
  * @property {(url: string, opts?: FetchOptions) => Promise<string>}  fetchText
  * @property {(url: string, opts?: FetchOptions) => Promise<unknown>} fetchJson
+ * @property {(url: string, opts?: FetchOptions) => Promise<unknown>} fetchJsonRetry
+ *                               Same as fetchJson but retries transient failures
+ *                               (429, 5xx, network errors) with bounded exponential
+ *                               backoff + jitter — the Workday retry policy promoted
+ *                               to the shared context (#1A Smart 4). Providers that
+ *                               hit WAF/rate-limited APIs (greenhouse, lever) use
+ *                               this; providers with their own retry (ashby, workday)
+ *                               keep it.
+ * @property {(url: string, opts?: FetchOptions) => Promise<string>}  fetchTextRetry
+ *                               Same as fetchText, with the same retry policy as
+ *                               fetchJsonRetry.
  * @property {number} [maxPages] Optional pagination hint. When set (verify-portals.mjs's
  *                              health probe passes 1), a paginating provider SHOULD stop
  *                              after this many pages — the probe only needs the first page
@@ -116,6 +143,15 @@
  * @property {string} id                                                       Unique across all loaded providers.
  * @property {((entry: PortalEntry) => (DetectHit | null))} [detect]           Optional auto-detection.
  * @property {(entry: PortalEntry, ctx: Context) => Promise<Job[]>} fetch      Required.
+ * @property {number} [maxConcurrency] Optional per-provider concurrency cap.
+ *                               scan.mjs groups fetch tasks by provider id and
+ *                               runs each group with at most
+ *                               `min(maxConcurrency, groupSize)` concurrent
+ *                               fetch() calls. Defaults to scan.mjs's global
+ *                               CONCURRENCY (10) when absent. Set lower for ATS
+ *                               APIs that rate-limit per host (greenhouse/lever/
+ *                               ashby ~4-5); workday's WAF is handled by its own
+ *                               retry, so it stays at the default.
  */
 
 export {};

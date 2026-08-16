@@ -41,9 +41,10 @@ import { buildTrustValidator } from './providers/_trust-validator.mjs';
 import { loadProviders, resolveProvider } from './providers/_registry.mjs';
 import { mergeProviderPlugins } from './plugins/_engine.mjs';
 import { classifyFetchError } from './verify-portals.mjs';
-import { fingerprintText, findCrossListings } from './fingerprint-core.mjs';
+import { fingerprintText, findCrossListings, clusterByFingerprint } from './fingerprint-core.mjs';
 import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
 import { normalizeCompany } from './tracker-utils.mjs';
+import { classifyTier } from './classify-tier.mjs';
 
 try {
   const { config } = await import('dotenv');
@@ -105,6 +106,89 @@ export function buildTitleFilter(titleFilter) {
     const hasPositive = positive.length === 0 || positive.some(m => m(lower));
     const hasNegative = negative.some(m => m(lower));
     return hasPositive && !hasNegative;
+  };
+}
+
+// ── Smart 1: relevance tagger (0-3) ─────────────────────────────────────────
+// A soft scan-time signal, not a filter: pipeline entries carry `relevance: N`
+// so the eval layer (scan-and-process.mjs, Task C) can rank and process the
+// top-N most promising offers first. Three independent +1 signals, each derived
+// from the user's REAL profile (config/profile.yml) — no hardcoded taxonomy:
+//   +1  title keyword matches a target-role keyword (compileKeyword: 2-3 letter
+//       all-letter keywords match word-boundary, longer terms are substrings)
+//   +1  company is on the enabled watchlist (the tracked_companies being scanned)
+//   +1  seniority tier of the title equals a tier the profile targets
+// Role-generic words (engineer, senior, staff, …) are stopwords — they'd tag
+// every offer +1 and drown the signal. Missing/unparseable profile → all three
+// signals degrade to 0 (no fabrications).
+
+/** Words too generic to indicate relevance on their own — without these almost
+ * every role in the domain would match the keyword +1 and the tag would never
+ * differentiate. */
+const RELEVANCE_STOPWORDS = new Set([
+  'engineer', 'engineering', 'senior', 'staff', 'principal', 'lead', 'head',
+  'software', 'developer', 'development', 'systems', 'system', 'cloud',
+  'network', 'architect', 'manager', 'management', 'specialist', 'analyst',
+  'consultant', 'ii', 'iii', 'iv',
+]);
+
+/** Pull target-role keywords from the profile: the primary target role plus any
+ * archetype names. Returns a set of lowercase, stopword-filtered terms — or an
+ * empty set when the profile lacks them (tagger degrades, never fabricates). */
+function extractTargetRoleKeywords(profile) {
+  const terms = new Set();
+  const add = (t) => {
+    if (t == null) return;
+    const s = String(t).toLowerCase().trim();
+    if (s && !RELEVANCE_STOPWORDS.has(s)) terms.add(s);
+  };
+  const target = profile?.target_roles;
+  if (target && typeof target === 'object') {
+    if (Array.isArray(target)) target.forEach(add);
+    else {
+      const primary = target.primary ?? target.title ?? target.role;
+      add(typeof primary === 'object' && primary ? primary.title : primary);
+      if (Array.isArray(target.all)) target.all.forEach(add);
+    }
+  }
+  if (Array.isArray(profile?.archetypes)) {
+    profile.archetypes.forEach((a) => add(a?.name));
+  }
+  return terms;
+}
+
+/** Compile a (job) → 0..3 tagger from the user's profile + the enabled watchlist. */
+function buildRelevanceTagger({ profile, watchlistCompanies }) {
+  const keywords = [...extractTargetRoleKeywords(profile)];
+  const matchers = keywords.map(compileKeyword);
+  const watchlist = new Set((watchlistCompanies || []).map((c) => c.toLowerCase()));
+  const targetTiers = new Set();
+  const target = profile?.target_roles;
+  const seniority = (Array.isArray(target) ? null : target?.seniority)
+    ?? profile?.target_seniority;
+  const addTier = (t) => {
+    if (t == null) return;
+    const tier = classifyTier(String(t).toLowerCase()) ?? '';
+    if (tier) targetTiers.add(tier);
+  };
+  if (Array.isArray(seniority)) seniority.forEach(addTier);
+  else addTier(seniority);
+  if (Array.isArray(profile?.archetypes)) {
+    profile.archetypes.forEach((a) => {
+      const levels = Array.isArray(a?.levels) ? a.levels : [a?.level];
+      levels.forEach(addTier);
+    });
+  }
+
+  return (job) => {
+    if (!job || typeof job !== 'object') return 0;
+    const title = String(job.title || '').toLowerCase();
+    let score = 0;
+    if (title && matchers.some((m) => m(title))) score += 1;
+    const company = String(job.company || '').toLowerCase();
+    if (company && watchlist.has(company)) score += 1;
+    if (title && targetTiers.has(classifyTier(title) ?? '')) score += 1;
+    return score;
   };
 }
 
@@ -441,6 +525,18 @@ export function loadReApplyWindows(profilePath = PROFILE_PATH) {
       validWindows[company] = win;
     }
     return validWindows;
+  } catch {
+    return {};
+  }
+}
+
+/** Load the user profile (config/profile.yml) — best-effort; returns {} when
+ * absent/unparseable so callers (e.g. the relevance tagger) degrade gracefully
+ * instead of throwing. */
+export function loadProfile(profilePath = PROFILE_PATH) {
+  if (!existsSync(profilePath)) return {};
+  try {
+    return yaml.load(readFileSync(profilePath, 'utf-8')) || {};
   } catch {
     return {};
   }
@@ -1022,37 +1118,45 @@ export function formatTrustSegment(offer) {
   return sanitizeMarkdownField(`trust: ${body}`);
 }
 
+// Compensation as a labeled segment (`salary: {range} {currency}`) rather than
+// positional column 5 — matches the tagged-segment contract in modes/pipeline.md
+// and never forces a spurious empty location cell when only salary is present.
+// Emits nothing when the provider exposed no salary (Smart 2: "providers without
+// omit" — no fabricated figures, ever).
+export function formatSalarySegment(salary) {
+  if (!salary || typeof salary !== 'object') return '';
+  const num = (n) => (Number.isFinite(n) && n > 0 ? String(Math.round(n)) : null);
+  const lo = num(salary.min);
+  const hi = num(salary.max);
+  const range = lo && hi && lo !== hi ? `${lo}-${hi}` : (lo || hi || '');
+  if (!range) return '';
+  const currency = typeof salary.currency === 'string' ? salary.currency.trim() : '';
+  return sanitizeMarkdownField(`salary: ${currency ? `${range} ${currency}` : range}`);
+}
+
 export function formatPipelineOffer(offer) {
   const url = sanitizePipelineUrl(offer.url);
   const company = sanitizeMarkdownField(offer.company);
   const title = sanitizeMarkdownField(offer.title);
   // Optional trailing columns, each sanitized like every other field:
-  //   4th = location, 5th = compensation.
-  // Gate location on an actual string so malformed provider data (a number or
-  // object) degrades to the 3-column form instead of stringifying into a
-  // spurious column. The columns are positional, so a present compensation
-  // forces the (possibly empty) location cell to keep comp in column 5.
+  //   4th = location. Compensation is no longer positional (was col 5) — it
+  //   ships as the `salary:` tagged segment below, so a salary never forces a
+  //   spurious empty location cell and readers don't track column 5.
   // loadSeenUrls dedups on the URL and ignores trailing columns (backward-compatible).
   const location = typeof offer.location === 'string' ? sanitizeMarkdownField(offer.location) : '';
-  const compensation = formatCompensation(offer.salary);
   const base = `- [ ] ${url} | ${company} | ${title}`;
-  let line = base;
-  if (compensation) line = `${base} | ${location} | ${compensation}`;
-  else if (location) line = `${base} | ${location}`;
-  // Optional labeled posting-date segment (like note:) — keeps the positional
-  // 1/3/4/5-column contract in modes/pipeline.md intact.
+  let line = location ? `${base} | ${location}` : base;
+  // Optional labeled segments, emitted in a stable order
+  // (posted: → trust: → salary: → relevance: → note:) so readers can split on
+  // ` | ` and index known tags by name.
   const posted = postedAtIsoDate(offer.postedAt);
   if (posted) line = `${line} | posted: ${posted}`;
-  // Labeled trust/legitimacy segment (#1743) — rides like posted:/note:, emitted
-  // only when the scanner flagged the posting (score < 100). Ordered after
-  // posted:, before note:, for a stable serialization.
   const trust = formatTrustSegment(offer);
   if (trust) line = `${line} | ${trust}`;
-  // Optional free-text ranking signal (e.g. a curated-list flag an importer
-  // attaches). Labeled — not positional like location/compensation — so it can
-  // ride on any row shape (bare URL, 3-, 4-, or 5-column) without a reader
-  // confusing it for a positional cell, and it stays generic: nothing here is
-  // source-specific, and an offer without `note` produces byte-identical output.
+  const salary = formatSalarySegment(offer.salary);
+  if (salary) line = `${line} | ${salary}`;
+  const relevance = typeof offer.relevance === 'number' ? `relevance: ${offer.relevance}` : '';
+  if (relevance) line = `${line} | ${relevance}`;
   const note = typeof offer.note === 'string' ? sanitizeMarkdownField(offer.note) : '';
   return note ? `${line} | note: ${note}` : line;
 }
@@ -1298,20 +1402,28 @@ export function computeConsecutiveFailures(healthRecords) {
 
 // ── Parallel fetch with concurrency limit ───────────────────────────
 
-async function parallelFetch(tasks, limit) {
-  const results = [];
-  let i = 0;
-
-  async function next() {
-    while (i < tasks.length) {
-      const task = tasks[i++];
-      results.push(await task());
-    }
+// Per-provider concurrency pools (Smart 4): tasks are grouped by provider id
+// and each group runs at most min(task._maxConcurrency ?? defaultLimit,
+// groupSize) concurrent fetch() calls — so a rate-limited ATS host
+// (greenhouse/lever/ashby capped ~4-5) never receives the full global pool of
+// parallel requests. Tasks without _providerId fall into one 'default' group
+// under defaultLimit, byte-identical to the old single global pool. The results
+// array preserves original task order regardless of group interleaving.
+async function parallelFetch(tasks, defaultLimit = CONCURRENCY) {
+  const groups = new Map();
+  for (const task of tasks) {
+    const key = task._providerId || 'default';
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(task);
   }
-
-  const workers = Array.from({ length: Math.min(limit, tasks.length) }, () => next());
-  await Promise.all(workers);
-  return results;
+  await Promise.all([...groups].map(async ([, group]) => {
+    const cap = Math.min(group[0]?._maxConcurrency ?? defaultLimit, group.length);
+    let i = 0;
+    async function next() {
+      while (i < group.length) await group[i++]();
+    }
+    await Promise.all(Array.from({ length: cap }, () => next()));
+  }));
 }
 
 // ── Main ────────────────────────────────────────────────────────────
@@ -1489,14 +1601,9 @@ async function main() {
   const titleFilter = buildTitleFilter(config.title_filter);
 
   // Seniority tier classifier integration
-  let classifyTier = null;
   const skipTiers = Array.isArray(config.skip_tiers)
     ? config.skip_tiers.filter(t => typeof t === 'string').map(t => t.toLowerCase())
     : [];
-  if (skipTiers.length > 0) {
-    const mod = await import('./classify-tier.mjs');
-    classifyTier = mod.classifyTier || mod.default;
-  }
 
   const locationFilter = buildLocationFilter(config.location_filter);
   const postingAgeFilter = buildPostingAgeFilter(config.max_posting_age_days);
@@ -1595,6 +1702,13 @@ async function main() {
   const newOffers = [];
   const errors = [...resolveErrors];
   const emptyTargets = [];
+
+  // Smart 1 — relevance tagger, built once from the (now-final) enabled target
+  // set + the user profile. Every offer pushed below carries `relevance: 0-3`.
+  const relevanceTagger = buildRelevanceTagger({
+    profile: loadProfile(),
+    watchlistCompanies: targets.map((t) => t.name),
+  });
 
   const tasks = targets.map(company => async () => {
     let provider = company._provider;
@@ -1709,6 +1823,7 @@ async function main() {
           source: sourceName,
           tracked: Boolean(careersUrlDomain),
           careersUrlDomain,
+          relevance: relevanceTagger(job),
         });
       }
     } catch (err) {
@@ -1719,6 +1834,13 @@ async function main() {
       });
     }
   });
+
+  // Smart 4 — tag each task with its provider's concurrency cap so parallelFetch
+  // can run per-provider pools (instead of one global pool).
+  for (const [i, company] of targets.entries()) {
+    tasks[i]._providerId = company._provider?.id;
+    tasks[i]._maxConcurrency = company._provider?.maxConcurrency;
+  }
 
   await parallelFetch(tasks, CONCURRENCY);
 
@@ -1750,7 +1872,36 @@ async function main() {
   for (const offer of verifiedOffers) {
     offer.fingerprint = fingerprintText(offer.description);
   }
-  const crossListings = findCrossListings(verifiedOffers, loadFingerprintHistory());
+  // Smart 5 — cross-listing dedup at scan time. Both cases drop BEFORE
+  // pipeline.md so one JD body yields exactly one entry:
+  //   1. Body matched a recent scan-history row under a DIFFERENT company →
+  //      drop, and record the drop as `skipped_crosslisted` so future scans
+  //      skip it via the same permanent-dedup rule as every other skip reason.
+  //   2. Two providers returned near-identical bodies in THIS run (same job on
+  //      two ATS) → keep the higher-trust / tracked source, drop the rest. The
+  //      kept entry's fingerprint covers the dropped ones in history.
+  const fingerprintHistory = loadFingerprintHistory();
+  const crossListings = findCrossListings(verifiedOffers, fingerprintHistory);
+  const crosslistedForHistory = crossListings.map((m) => m.offer);
+  const historyDroppedUrls = new Set(crosslistedForHistory.map((o) => o.url));
+
+  const intraRunCandidates = verifiedOffers.filter((o) => !historyDroppedUrls.has(o.url));
+  const intraRunDropped = [];
+  for (const cluster of clusterByFingerprint(intraRunCandidates)) {
+    if (cluster.length <= 1) continue;
+    const group = cluster
+      .map((i) => intraRunCandidates[i])
+      .sort((a, b) =>
+        (b.trustScore ?? 0) - (a.trustScore ?? 0) ||
+        Number(Boolean(b.tracked)) - Number(Boolean(a.tracked))
+      );
+    intraRunDropped.push(...group.slice(1));
+  }
+  const droppedCrosslistedUrls = new Set([
+    ...historyDroppedUrls,
+    ...intraRunDropped.map((o) => o.url),
+  ]);
+  verifiedOffers = verifiedOffers.filter((o) => !droppedCrosslistedUrls.has(o.url));
 
   // 6. Write results
   if (!dryRun && verifiedOffers.length > 0) {
@@ -1799,6 +1950,15 @@ async function main() {
     }
   }
 
+  // Smart 5 drops — same "any non-added status is permanently deduped" rule as
+  // every other skip reason above, so a cross-listed JD body is written once.
+  if (!dryRun && crosslistedForHistory.length > 0) {
+    appendToScanHistory(crosslistedForHistory, date, 'skipped_crosslisted');
+  }
+  if (!dryRun && intraRunDropped.length > 0) {
+    appendToScanHistory(intraRunDropped, date, 'skipped_crosslisted');
+  }
+
   // 7. Print summary
   console.log(`\n${'━'.repeat(45)}`);
   console.log(`Portal Scan — ${date}`);
@@ -1832,13 +1992,14 @@ async function main() {
       console.log(`Blacklisted:           ${totalFilteredBlacklist} skipped (blacklist)`);
     }
   }
-  if (crossListings.length > 0) {
-    console.log(`\n⚠️  Possible cross-listings (same JD text, different company) — warn only, nothing was dropped:`);
+  const totalCrosslistDropped = crosslistedForHistory.length + intraRunDropped.length;
+  if (totalCrosslistDropped > 0) {
+    console.log(`\nCross-listed / duplicated postings (Smart 5): ${totalCrosslistDropped} dropped — one entry per JD body:`);
     for (const { offer, row, score } of crossListings) {
-      console.log(`  - ${offer.company} — ${offer.title}`);
-      console.log(`    ≈ ${Math.round(score * 100)}% of ${row.company} — ${row.title} (seen ${row.dateStr})`);
-      console.log(`    ${offer.url}`);
-      console.log(`    vs ${row.url}`);
+      console.log(`  - ${offer.company} — ${offer.title} dropped (≈${Math.round(score * 100)}% of ${row.company} — ${row.title}, seen ${row.dateStr})`);
+    }
+    for (const offer of intraRunDropped) {
+      console.log(`  - ${offer.company} — ${offer.title} dropped (duplicate body this run, kept higher-trust source)`);
     }
     console.log(`  If one side is an agency, apply through ONE channel only — a double submission burns both (#1596).`);
   }

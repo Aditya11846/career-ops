@@ -26,6 +26,9 @@ data/company-signals.json
 data/needs-input-queue.json
 data/approve-queue.json
 data/submission-log.jsonl
+data/ats-account-log.jsonl
+data/ats-agent-trace.jsonl
+data/ats-credentials/
 data/tier2-apply-counts.json
 data/parser-output/**/*.json
 !data/parser-output/.gitkeep
@@ -48,6 +51,9 @@ batch/tracker-additions/**/*.tsv
 !batch/tracker-additions/.gitkeep
 jds/*
 !jds/.gitkeep
+
+# Ad-hoc personal-data backups/resets (contains real CVs, pipeline, signals — PII)
+data/archive/
 
 # Personal documents — never commit scans or copies of these (PII).
 # Catches common identity/credential filenames so they can't be staged by accident.

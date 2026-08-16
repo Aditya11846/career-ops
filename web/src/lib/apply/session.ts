@@ -111,7 +111,7 @@ async function enrichFromAts(url: string, fields: ApplyField[]): Promise<void> {
 // so we can: extract → (user verifies pre-filled answers) → FILL the real form →
 // bringToFront() for the human to submit it themselves. Headed (channel:chrome) =
 // the user's own Chrome on their residential IP (best ATS success); never submits.
-type Session = { id: string; url: string; title: string; fields: ApplyField[]; context: BrowserContext; page: Page; frame: Frame; createdAt: number; formShot?: string };
+type Session = { id: string; url: string; title: string; fields: ApplyField[]; context: BrowserContext; page: Page; frame: Frame; createdAt: number; formShot?: string; driveMode?: "explore" | "account" };
 
 declare global {
   // eslint-disable-next-line no-var
@@ -264,16 +264,38 @@ export async function openSession(url: string, cliId?: string, forceAgent?: bool
   //    so we abort directly with the right message (no wasted AI run).
   if (!aiInterpreted && !looksLikeApplicationForm(form)) {
     const why = await classifyEmpty(page, url);
+    // ACCOUNT/LOGIN GATE — "workday", "login-wall", "auth-required" all mean
+    // "this site wants a login before it'll show the real form," not "there's
+    // no form to interpret." live-agent.ts runs a real observe-decide-act loop
+    // (not a fixed classifier) to create/verify/log into whatever account the
+    // page actually needs — generic, not Workday-specific — unattended. Not
+    // "no-form" (drive.ts's own explore mode already owns that, correctly, and
+    // by construction never submits) and not "listing-page" (no single form to
+    // navigate toward — the URL just isn't a specific posting).
+    //
+    // Like the no-form case below, this KEEPS the session open and hands off to
+    // the STREAMED drive route (/api/apply/drive) — driveMode:"account" tells
+    // that route to run live-agent.ts instead of drive.ts's explorer, so every
+    // step (what it's doing, and why) streams live to the UI instead of running
+    // silently and only being visible in data/ats-account-log.jsonl afterward.
+    if (cliId && (why.code === "workday" || why.code === "login-wall" || why.code === "auth-required")) {
+      const id = `apply-${crypto.randomUUID()}`;
+      const title = form.title || (await page.title().catch(() => "")) || "Application";
+      SESSIONS.set(id, { id, url, title, fields: [], context, page, frame, createdAt: Date.now(), formShot: shots[shots.length - 1], driveMode: "account" });
+      return { id, title, fields: [], shots, issues: [], needsDrive: true };
+    }
     // Driveable (controls present, not a hard block) + we have an agent → KEEP the
     // session open and hand off to the STREAMED drive route, so the user watches
     // the agent reach the form live (/api/apply/drive). Otherwise abort.
-    if (cliId && why.code === "no-form") {
-      const id = `apply-${crypto.randomUUID()}`;
-      const title = form.title || (await page.title().catch(() => "")) || "Application";
-      SESSIONS.set(id, { id, url, title, fields: [], context, page, frame, createdAt: Date.now(), formShot: shots[shots.length - 1] });
-      return { id, title, fields: [], shots, issues: [], needsDrive: true };
+    if (!looksLikeApplicationForm(form)) {
+      if (cliId && why.code === "no-form") {
+        const id = `apply-${crypto.randomUUID()}`;
+        const title = form.title || (await page.title().catch(() => "")) || "Application";
+        SESSIONS.set(id, { id, url, title, fields: [], context, page, frame, createdAt: Date.now(), formShot: shots[shots.length - 1], driveMode: "explore" });
+        return { id, title, fields: [], shots, issues: [], needsDrive: true };
+      }
+      return abort(why.message);
     }
-    return abort(why.message);
   }
 
   // 6) Soft issues the user should know about — surfaced, never silent.

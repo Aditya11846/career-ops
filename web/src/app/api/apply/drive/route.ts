@@ -1,5 +1,6 @@
 import { getSession, finalizeDrivenSession, extractCurrent, isApplicationFormFn, handoffSession } from "@/lib/apply/session";
 import { driveSession } from "@/lib/apply/drive";
+import { runLiveAgent } from "@/lib/apply/live-agent";
 import { classifyEmpty } from "@/lib/apply/diagnose";
 
 export const runtime = "nodejs";
@@ -23,7 +24,12 @@ export async function POST(req: Request) {
   const encoder = new TextEncoder();
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
+      let lastStepDetail: string | undefined;
       const emit = (o: unknown) => {
+        if (o && typeof o === "object" && "t" in o && (o as { t: unknown }).t === "step" && "detail" in o) {
+          const d = (o as { detail?: unknown }).detail;
+          if (typeof d === "string") lastStepDetail = d;
+        }
         try {
           controller.enqueue(encoder.encode(JSON.stringify(o) + "\n"));
         } catch {
@@ -40,7 +46,16 @@ export async function POST(req: Request) {
           }
         };
         const budget = goal === "full" ? 16 : 7;
-        const result = await driveSession(page, cliId, goal, isFormReady, (step) => emit({ t: "step", ...step }), budget, answers);
+        // driveMode:"account" (set by session.ts's openSession() when the page
+        // is login/signup-gated) runs live-agent.ts's account-creation loop
+        // instead of drive.ts's submit-free explorer — same streamed emit, same
+        // downstream finalize/error handling below, different capability (this
+        // one CAN create an account and submit a signup form; drive.ts never
+        // submits anything, by construction).
+        const result =
+          s.driveMode === "account"
+            ? await runLiveAgent(page, s.frame, s.url, s.title, cliId, (step) => emit({ t: "step", ...step }))
+            : await driveSession(page, cliId, goal, isFormReady, (step) => emit({ t: "step", ...step }), budget, answers);
 
         if (goal === "full") {
           // The agent filled the real form — bring it to the front for the human
@@ -61,7 +76,7 @@ export async function POST(req: Request) {
         }
         // Didn't reach a real form → classify why for a clear message.
         const why = await classifyEmpty(page, s.url).catch(() => ({ message: "Couldn't reach a fillable form on this page." }));
-        emit({ t: "error", reason: result.reason, message: result.reason === "stuck" ? result.steps.at(-1)?.detail || why.message : why.message });
+        emit({ t: "error", reason: result.reason, message: lastStepDetail || why.message });
       } catch (e) {
         emit({ t: "error", message: e instanceof Error ? e.message.slice(0, 160) : "drive failed" });
       } finally {
