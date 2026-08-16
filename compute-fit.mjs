@@ -1,0 +1,776 @@
+#!/usr/bin/env node
+/**
+ * compute-fit.mjs — per-posting judgment signals for Amit Kumar
+ * Singh's search (comp effective-value, India-hireability confidence, domain
+ * fit), plus the blended ranking function.
+ *
+ * Follows signal-agent/compute-heat.mjs's shape deliberately: pure, exported,
+ * unit-testable core functions; a thin CLI on top; a --self-test suite. Never
+ * touches modes/_shared.md's existing 1-5 scoring formula — these are
+ * additive signals meant to be attached to a report's Machine Summary
+ * (comp_effective_value_inr, india_hireability_confidence, domain_fit_score),
+ * the same pattern company_heat already established.
+ *
+ * IMPORTANT — tax-slab caveat: the Indian income-tax slab table below is a
+ * simplified, illustrative approximation of the new-regime structure, kept
+ * only precise enough for RELATIVE ranking between offers (comparing offer A
+ * vs offer B), not for real tax filing or a promised take-home number. It
+ * will drift from the actual notified slabs over time — verify against the
+ * current Finance Act before relying on it for an actual decision.
+ */
+
+import { readFileSync } from 'fs';
+import { readCompanySignal } from './signal-agent/compute-heat.mjs';
+
+// ── Comp effective-value (INR, India-tax-resident) ─────────────────────────
+
+// Illustrative new-regime slabs (annual taxable income, INR) — see caveat above.
+const INDIA_TAX_SLABS = [
+  { upTo: 400_000, rate: 0 },
+  { upTo: 800_000, rate: 0.05 },
+  { upTo: 1_200_000, rate: 0.10 },
+  { upTo: 1_600_000, rate: 0.15 },
+  { upTo: 2_000_000, rate: 0.20 },
+  { upTo: 2_400_000, rate: 0.25 },
+  { upTo: Infinity, rate: 0.30 },
+];
+const STANDARD_DEDUCTION_INR = 75_000;
+const CESS_RATE = 0.04;
+// Section 87A-style rebate: illustrative threshold below which effective tax
+// is treated as zero for ranking purposes (approximate, not exact law).
+const REBATE_TAXABLE_INCOME_CEILING_INR = 1_200_000;
+
+/** Pure slab-based tax calculation on already-computed taxable income. */
+export function computeIndianTaxINR(taxableIncomeInr) {
+  const income = Math.max(0, Number(taxableIncomeInr) || 0);
+  if (income <= REBATE_TAXABLE_INCOME_CEILING_INR) return 0;
+
+  let tax = 0;
+  let lower = 0;
+  for (const { upTo, rate } of INDIA_TAX_SLABS) {
+    if (income <= lower) break;
+    const slabAmount = Math.min(income, upTo) - lower;
+    if (slabAmount > 0) tax += slabAmount * rate;
+    lower = upTo;
+    if (income <= upTo) break;
+  }
+  return Math.round(tax * (1 + CESS_RATE));
+}
+
+// Default static FX table used when no live rate is supplied/fetched — kept
+// only as a last-resort fallback so the pure function never throws; a real
+// invocation should pass a fresh `fxRates` map (see fetchFxRatesToInr below).
+const FALLBACK_FX_TO_INR = {
+  INR: 1,
+  USD: 87,
+  EUR: 94,
+  GBP: 110,
+};
+
+/**
+ * Fetch today's FX rates to INR from a free public API. Injectable
+ * `fetchImpl` for tests (mirrors compute-heat.mjs's githubActivityScore
+ * pattern) — never throws; falls back to the static table on any failure.
+ */
+export async function fetchFxRatesToInr({ fetchImpl = fetch } = {}) {
+  try {
+    const res = await fetchImpl('https://open.er-api.com/v6/latest/INR');
+    if (!res.ok) return FALLBACK_FX_TO_INR;
+    const json = await res.json();
+    const rates = json?.rates;
+    if (!rates || typeof rates !== 'object') return FALLBACK_FX_TO_INR;
+    // API gives INR->X; invert to X->INR for our use.
+    const toInr = { INR: 1 };
+    for (const [code, rateFromInr] of Object.entries(rates)) {
+      const n = Number(rateFromInr);
+      if (n > 0) toInr[code] = 1 / n;
+    }
+    return toInr;
+  } catch {
+    return FALLBACK_FX_TO_INR;
+  }
+}
+
+/**
+ * Effective annual value, in net INR, of one comp component.
+ *
+ * @param {{amount:number, currency:string, kind:'cash'|'public_equity'|'private_equity'}} input
+ * @param {Record<string,number>} fxRatesToInr - currency code -> INR multiplier.
+ * @returns {{grossInr:number, weightedGrossInr:number, netInr:number|null, excluded:boolean, note:string}}
+ */
+export function computeEffectiveValueINR({ amount, currency = 'USD', kind = 'cash' } = {}, fxRatesToInr = FALLBACK_FX_TO_INR) {
+  const rate = fxRatesToInr[String(currency).toUpperCase()] ?? FALLBACK_FX_TO_INR[String(currency).toUpperCase()];
+  if (!rate) {
+    return { grossInr: 0, weightedGrossInr: 0, netInr: null, excluded: true, note: `no FX rate for ${currency}` };
+  }
+  const grossInr = Math.round((Number(amount) || 0) * rate);
+
+  if (kind === 'private_equity') {
+    // Resolved direction: private-company equity is informational only, never
+    // counted toward the ranked effective value — priority is reliable income
+    // after an 18-month gap, not speculative illiquid upside.
+    return { grossInr, weightedGrossInr: 0, netInr: null, excluded: true, note: 'private equity — informational only, excluded from ranked value' };
+  }
+
+  // Public RSUs: real and liquid, but volatile/vesting-cliff risk — haircut
+  // rather than face value (resolved direction: ~40-50% off).
+  const weight = kind === 'public_equity' ? 0.5 : 1;
+  const weightedGrossInr = Math.round(grossInr * weight);
+  const netInr = Math.max(0, weightedGrossInr - computeIndianTaxINR(Math.max(0, weightedGrossInr - STANDARD_DEDUCTION_INR)));
+
+  return { grossInr, weightedGrossInr, netInr, excluded: false, note: kind === 'public_equity' ? 'public equity, 50% haircut applied' : 'cash, full weight' };
+}
+
+/**
+ * Sum multiple comp components (base + bonus + equity, mixed currencies/kinds)
+ * into one net-INR effective value for ranking. Excluded components (private
+ * equity) are summed separately as an informational-only figure.
+ */
+export function computeTotalEffectiveValueINR(components = [], fxRatesToInr = FALLBACK_FX_TO_INR) {
+  let netInr = 0;
+  let excludedGrossInr = 0;
+  const details = [];
+  for (const component of components) {
+    const result = computeEffectiveValueINR(component, fxRatesToInr);
+    details.push(result);
+    if (result.excluded) excludedGrossInr += result.grossInr;
+    else netInr += result.netInr ?? 0;
+  }
+  return { netInr: Math.round(netInr), excludedGrossInr: Math.round(excludedGrossInr), details };
+}
+
+// ── Geo eligibility taxonomy (2026-08-02) ───────────────────────────────────
+// The core finding that motivated this: "Remote" is meaningless without
+// knowing FROM WHERE. A posting saying "Remote" that actually means
+// "remote-within-the-US" is not reachable from India — but the old scorer
+// below only detected POSITIVE evidence (an India entity, an EOR mention, a
+// JD explicitly listing India as eligible) and fell back to the SAME neutral
+// baseline for both "no info either way" and "explicitly US-only." Those are
+// not the same thing, and conflating them means some real fraction of a
+// senior candidate's 1.8-year search may have gone into applying to roles
+// that were structurally impossible from day one, not lost on merit. Fixing
+// this detection was named the single highest-leverage change in this
+// project (2026-08-02 brainstorm) — ahead of any scoring refinement.
+//
+// Grounded in real location strings pulled from this project's own
+// data/scan-history.tsv, not assumed patterns — e.g. confirmed real values:
+// "USA - Remote", "Bangalore, India - Remote", "Canada - Remote AB",
+// "Distributed" (bare = genuinely global) vs "APAC - Distributed (Taiwan)" /
+// "US - Distributed" (region-qualified = NOT global), "IND-Pune EON Kharadi
+// Infrastructure", "Bangalore, IND; Hyderabad, IND; Mohali, IND; Pune, IND".
+
+const GEO_TIERS = /** @type {const} */ (['india-eligible', 'global-remote', 'restricted', 'unknown']);
+
+// Word-boundary matched — "India" as a substring would false-positive on
+// "Indiana" (confirmed live: /india/.test("Indiana") is true, /\bindia\b/ is
+// false). "IND" as a 3-letter country code appears in real scan data too
+// ("Bangalore, IND") but is too short to word-boundary-match safely against
+// unrelated words, so it's matched only as a comma/semicolon-delimited token.
+const INDIA_PATTERN = /\bindia\b/i;
+// "IND" as a standalone token (confirmed live: \b handles comma/semicolon/
+// hyphen/space/start/end delimiters uniformly, e.g. real data "IND-Pune EON
+// Kharadi Infrastructure" and "Bangalore, IND; Hyderabad, IND" both match;
+// "Indiana"/"Industry" do not, since there's no boundary mid-word).
+const INDIA_CODE_PATTERN = /\bind\b/i;
+
+// Bare "distributed"/"worldwide"/explicit "anywhere" phrasing. Deliberately
+// does NOT match region-qualified distributed ("APAC - Distributed (Taiwan)",
+// "US - Distributed") — those are real, confirmed-live false positives for
+// "global" that a naive "distributed" substring match would have caught.
+const GLOBAL_REMOTE_PATTERN = /(^|[,;·]\s*)(distributed|worldwide)\s*($|[,;·(])|work from anywhere|remote[\s-]*(global|anywhere)|fully remote,?\s*global/i;
+
+// Specific non-India countries/major hiring hubs/US states seen in this
+// project's real scan data. When one of these matches WITHOUT an India
+// mention, that's real negative evidence — not silence.
+const OTHER_COUNTRY_PATTERN =
+  /\b(usa?|u\.s\.a?\.?|united states|canada|u\.?k\.?|united kingdom|singapore|israel|germany|france|austria|brazil|hungary|australia|japan|taiwan|dubai|uae|mexico|ireland|netherlands|spain|italy|poland|philippines|vietnam|china)\b|\b(california|colorado|washington|texas|new york|illinois|georgia|florida|virginia|massachusetts|new jersey|ontario|alberta|british columbia)\b/i;
+
+// Workday's own "XXX-City" location format uses 3-letter country codes with
+// no spelled-out country name at all (e.g. real data: "SGP-Yishun",
+// "IRL-Cork-Kavanagh House", "AUT-Vienna Am Europlatz 5") — the word-based
+// pattern above can't catch these since the country name never appears.
+// This is the exact, finite set of codes confirmed present in this project's
+// own scan-history.tsv (excluding IND, which is positive evidence, handled
+// separately by INDIA_CODE_PATTERN above) — not a guessed broad list.
+const WORKDAY_COUNTRY_CODE_PATTERN = /\b(aus|aut|bra|chn|cze|irl|isr|jpn|sgp|usa)-/i;
+
+// Explicit work-authorization / citizenship / clearance language — the
+// strongest possible negative signal, usually only findable in full JD text
+// (not the short location field), so this matters most at full-evaluation
+// time (see modes/oferta.md) rather than the cheap inbox stage.
+const WORK_AUTH_NEGATIVE_PATTERN =
+  /\b(us|u\.s\.)\s*citizens?\s*(only|required)\b|must be (?:a )?(?:us|u\.s\.)\s*citizen|authorized to work in the (?:united states|us)\s*(without sponsorship)?|not (?:eligible|able) (?:for|to provide) (?:visa )?sponsorship|security clearance required|active (?:secret|top secret) clearance|must (?:currently )?reside in the (?:united states|us|uk)|this (?:role|position) is not (?:eligible for )?remote (?:work )?outside/i;
+
+/**
+ * Classify geo eligibility into a real taxonomy instead of one blended
+ * number — brainstorm items #1 (negative detection) + #2 (taxonomy) +
+ * #3 (general work-authorization language, not just India-specific).
+ *
+ * @param {{locationText?:string, jdText?:string}} input
+ * @returns {{tier: 'india-eligible'|'global-remote'|'restricted'|'unknown', confidence:number, evidence:string}}
+ */
+export function classifyGeoEligibility({ locationText = '', jdText = '' } = {}) {
+  const loc = String(locationText || '');
+  const jd = String(jdText || '');
+  const combined = `${loc} ${jd}`;
+
+  if (INDIA_PATTERN.test(combined) || INDIA_CODE_PATTERN.test(loc)) {
+    return { tier: 'india-eligible', confidence: 85, evidence: 'India explicitly listed in location/JD' };
+  }
+  if (WORK_AUTH_NEGATIVE_PATTERN.test(jd)) {
+    const m = jd.match(WORK_AUTH_NEGATIVE_PATTERN);
+    return { tier: 'restricted', confidence: 5, evidence: `explicit work-authorization restriction: "${m[0]}"` };
+  }
+  const otherCountryHit = OTHER_COUNTRY_PATTERN.test(loc) || WORKDAY_COUNTRY_CODE_PATTERN.test(loc);
+  if (GLOBAL_REMOTE_PATTERN.test(combined) && !otherCountryHit) {
+    return { tier: 'global-remote', confidence: 70, evidence: 'genuinely global/distributed remote, no country qualifier' };
+  }
+  if (otherCountryHit) {
+    const m = loc.match(OTHER_COUNTRY_PATTERN) || loc.match(WORKDAY_COUNTRY_CODE_PATTERN);
+    return { tier: 'restricted', confidence: 15, evidence: `location restricted to a non-India country/hub: "${m[0]}"` };
+  }
+  return { tier: 'unknown', confidence: 30, evidence: 'no geo signal found either way — silence is not proof of exclusion' };
+}
+
+// Below this confidence, a posting is treated as a geo near-gate match (see
+// filter-inbox-by-fit.mjs) — mirrors DOMAIN_FIT_GATE_THRESHOLD's existing
+// near-gate pattern (excluded from the ranked list, not silently discarded —
+// moved to a separate, inspectable bucket so the reason stays visible).
+export const GEO_GATE_CONFIDENCE_THRESHOLD = 20;
+
+const HIREABILITY_WEIGHTS = {
+  indiaEntityEvidence: 55,
+  eorPartnerMentioned: 45,
+};
+
+const EOR_PROVIDER_NAMES = ['deel', 'remote.com', 'multiplier', 'papaya global', 'papaya', 'rippling', 'oyster', 'globalization partners', 'g-p'];
+
+/**
+ * Weighted India-hireability confidence, 0-100. Thin wrapper around
+ * classifyGeoEligibility() that keeps the existing 0-100 contract intact
+ * (india_hireability_confidence is read by analyze-patterns.mjs) while the
+ * real detection logic now lives in the taxonomy classifier above. Still
+ * never a hard binary for the BLENDED rank — the near-gate is applied
+ * separately, at the pipeline stage, not inside this scoring function.
+ *
+ * @param {{jdText?:string, locationText?:string, companyHasIndiaEntity?:boolean, mentionsEOR?:boolean}} input
+ */
+export function scoreIndiaHireability({ jdText = '', locationText = '', companyHasIndiaEntity = false, mentionsEOR = false } = {}) {
+  const text = String(jdText || '').toLowerCase();
+  const explicitEorMention = mentionsEOR || EOR_PROVIDER_NAMES.some(name => text.includes(name));
+
+  const geo = classifyGeoEligibility({ locationText, jdText });
+  if (geo.tier === 'india-eligible') return clamp0to100(geo.confidence + (explicitEorMention ? 10 : 0));
+  if (geo.tier === 'restricted') return clamp0to100(geo.confidence); // real negative evidence — do NOT let entity/EOR evidence override an explicit restriction
+  if (companyHasIndiaEntity) return clamp0to100(HIREABILITY_WEIGHTS.indiaEntityEvidence);
+  if (explicitEorMention) return clamp0to100(HIREABILITY_WEIGHTS.eorPartnerMentioned);
+  if (geo.tier === 'global-remote') return clamp0to100(geo.confidence);
+  return geo.confidence; // 'unknown' -> same 30 baseline as before, unchanged contract
+}
+
+// ── Domain fit (near-gate) ──────────────────────────────────────────────────
+
+// Deterministic keyword-weighted heuristic used as the default, pure,
+// network-free scorer. An agent driving a real evaluation should prefer
+// passing an LLM-judged score directly via --domain-fit (same
+// agent-supplies-the-nuanced-signal pattern as compute-heat.mjs's
+// --funding/--reddit/--linkedin flags) rather than relying on this heuristic
+// alone — keyword matching is a floor, not a replacement for reading the JD.
+// Grounded directly in cv.md's real content, not just the three specializations
+// named when this domain was first framed — a real live test (report 001,
+// Broadcom Staff Security Engineer) showed the narrower original list scored a
+// genuinely relevant, in-history-with-the-company role at only 12/20, purely
+// because the JD used general security vocabulary ("vulnerability," "threat,"
+// "incident response") that wasn't recognized, not because the role is a
+// mismatch. This heuristic can only ever approximate "could he actually do
+// this job" via keyword matching (the real judgment is the LLM evaluation's
+// Block B, CV Match) — the fix is broadening the vocabulary to match what's
+// actually on his resume, not building a smarter classifier.
+const DOMAIN_KEYWORDS = {
+  // Core specializations + general security-engineering vocabulary his 22-year
+  // career actually spans (encryption/DLP work at Symantec, current-era Zero
+  // Trust work at Akamai, plus the broader vulnerability/incident-response
+  // vocabulary the live Broadcom test proved was missing).
+  strong: [
+    'zero trust', 'endpoint encryption', 'endpoint security', 'dlp', 'data loss prevention',
+    'uefi', 'kernel driver', 'embedded systems', 'rtos', 'vpn', 'disk encryption', 'tcg opal', 'sdk architecture',
+    'vulnerability', 'incident response', 'penetration testing', 'malware', 'threat', 'exploit',
+    'cyber security', 'cybersecurity', 'application security', 'product security', 'security architecture', 'secure boot',
+  ],
+  // General technical range actually on his CV (compilers/VLIW at Synergy,
+  // caching/virtualization/NoSQL at PrimaryIO, IoT/cloud at KOKO, mobile SDKs
+  // at Nuance/Aztecsoft) — real, but broader than the core specializations.
+  //
+  // 'driver' (bare) was removed (2026-08-08) — real production false positive,
+  // live-confirmed: "Store Driver" / "CDL Delivery Truck Driver" (logistics
+  // roles) scored a moderate hit purely because the word "driver" appeared,
+  // meant only to catch "kernel driver"/"device driver" embedded-systems
+  // work. Word-boundary matching (see scoreDomainFit below) fixes the
+  // substring-hides-inside-a-word failure mode, but "driver" alone is a
+  // genuinely ambiguous whole word no boundary fix can solve — replaced with
+  // the specific compound phrases actually meant.
+  moderate: [
+    'c++', 'embedded', 'firmware', 'security engineer', 'systems engineer', 'network security', 'cryptography', 'encryption',
+    'compiler', 'distributed systems', 'cloud computing', 'virtualization', 'iot', 'kernel',
+    'device driver', 'driver development',
+    'real-time', 'socket programming', 'multithreading', 'mobile sdk',
+  ],
+  // Specific languages/tools on his CV — real evidence he could contribute
+  // technically, but common enough across unrelated domains that a match here
+  // alone should never carry a posting past the gate by itself.
+  //
+  // 'swift' (Apple's language) removed (2026-08-08) — same genuinely-ambiguous-
+  // whole-word problem as 'driver' above: it's also a plain English word and
+  // the name of a real company (Swift Transportation, a trucking carrier).
+  // Low weight (3pts) wasn't worth the ambiguity.
+  general: [
+    'python', 'java', 'golang', 'kotlin', 'objective-c', 'c#',
+    'tcp/ip', 'android', 'ios', 'linux kernel', 'bluetooth',
+  ],
+};
+
+// Every current and future keyword needs word-boundary matching, not just a
+// hand-picked few — text.includes(kw) has two independent failure modes,
+// both live-confirmed in production scan data: (1) short terms hiding inside
+// unrelated words ('ios' matched inside "biostatistics"; 'iot' would
+// structurally hide inside "patriot" the same way) and (2) genuinely
+// ambiguous whole words (handled above by removing/replacing the specific
+// offenders, since no regex fix can disambiguate a real word from itself).
+// This mirrors classifyGeoEligibility's identical fix for "india" matching
+// inside "Indiana" (see INDIA_PATTERN above) — same bug class, same fix,
+// applied structurally here instead of one keyword at a time.
+function escapeRegExp(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+function compileKeywordRegexes(keywords) {
+  return keywords.map(kw => ({ kw, re: new RegExp(`\\b${escapeRegExp(kw)}\\b`, 'i') }));
+}
+const DOMAIN_KEYWORD_REGEXES = {
+  strong: compileKeywordRegexes(DOMAIN_KEYWORDS.strong),
+  moderate: compileKeywordRegexes(DOMAIN_KEYWORDS.moderate),
+  general: compileKeywordRegexes(DOMAIN_KEYWORDS.general),
+};
+
+export function scoreDomainFit(jdText = '') {
+  const text = String(jdText || '');
+  let score = 0;
+  for (const { re } of DOMAIN_KEYWORD_REGEXES.strong) if (re.test(text)) score += 15;
+  for (const { re } of DOMAIN_KEYWORD_REGEXES.moderate) if (re.test(text)) score += 6;
+  for (const { re } of DOMAIN_KEYWORD_REGEXES.general) if (re.test(text)) score += 3;
+  return clamp0to100(score);
+}
+
+// Flat list of atomic strong+moderate terms (general tier skipped — too
+// generic/broad, e.g. bare language names, to make a good suggested-search
+// default), for seeding Explore's "Roles to find" field with real, tuned
+// vocabulary instead of narrative phrases. general is skipped for THIS
+// export only; scoreDomainFit above still scores it as usual.
+export const SUGGESTED_POSITIVE_TERMS = [...DOMAIN_KEYWORDS.strong, ...DOMAIN_KEYWORDS.moderate];
+
+// Below this, a posting is excluded from the ranked list entirely (near-gate,
+// per the resolved direction) — a perfectly-paid, definitely-hireable-in-India
+// role that's a domain mismatch (e.g. sales) shouldn't surface.
+export const DOMAIN_FIT_GATE_THRESHOLD = 20;
+
+// DOMAIN_FIT_GATE_THRESHOLD (20) is calibrated for full JD paragraph text,
+// where several keyword phrases can appear together. A bare 3-5 word job
+// title can realistically only ever hit one or two keywords — verified live:
+// "Staff Security Engineer" scores 6, well below 20, even though it's
+// obviously on-domain. Applying the JD threshold to title-only text would
+// filter out genuinely relevant postings. This is a deliberately separate,
+// much lower bar for cheap title/location-only triage: any keyword hit at
+// all (score > 0) is real positive signal at this length; zero means no
+// domain-relevant word appeared anywhere in the title/location. Exported so
+// every title-only caller (filter-inbox-by-fit.mjs, web/src/lib/core/scan.ts)
+// shares one definition instead of each re-deriving its own copy.
+export const TITLE_FIT_MIN_SCORE = 1;
+
+// ── Blended rank ─────────────────────────────────────────────────────────────
+
+const RANK_WEIGHTS = {
+  effectiveValue: 0.45,
+  hireability: 0.30,
+  stability: 0.25, // heat - layoffRisk, net
+};
+
+/**
+ * Combine signals into one rank. Domain fit is a near-gate (excludes below
+ * threshold); everything past the gate gets a weighted blend of comp
+ * effective-value (normalized against a reference ceiling), India-hireability
+ * confidence, and net company stability (heat minus layoff risk) — never a
+ * simple average of independent scorecards.
+ *
+ * @param {{domainFit:number, netEffectiveValueInr:number, hireability:number, heat?:number, layoffRisk?:number, effectiveValueCeilingInr?:number}} input
+ */
+export function blendRank({ domainFit, netEffectiveValueInr, hireability, heat = 50, layoffRisk = 0, effectiveValueCeilingInr = 6_000_000 }) {
+  if (domainFit < DOMAIN_FIT_GATE_THRESHOLD) {
+    return { rank: 0, excluded: true, reason: `domain fit ${domainFit} below gate threshold ${DOMAIN_FIT_GATE_THRESHOLD}` };
+  }
+  const effectiveValueScore = clamp0to100((netEffectiveValueInr / effectiveValueCeilingInr) * 100);
+  const stabilityScore = clamp0to100(heat - layoffRisk + 50); // centers a neutral heat=50/risk=0 at score 50
+  const rank = Math.round(
+    effectiveValueScore * RANK_WEIGHTS.effectiveValue +
+    hireability * RANK_WEIGHTS.hireability +
+    stabilityScore * RANK_WEIGHTS.stability
+  );
+  return { rank, excluded: false, effectiveValueScore, stabilityScore };
+}
+
+const INBOX_RANK_WEIGHTS = { domainFit: 0.6, stability: 0.4 };
+
+/**
+ * Cheap, inbox-time ranker — deliberately simpler than blendRank(), which
+ * requires a real comp figure to mean anything. Raw scanned postings almost
+ * never carry one, so this only ever combines domain fit (title+location,
+ * available for every provider) and company stability (heat - layoffRisk,
+ * from signal-agent's stored data, null if never scored) — never touches
+ * blendRank()'s own evaluation-time logic or weights.
+ *
+ * No gate here — filter-inbox-by-fit.mjs's own (much lower, title-calibrated)
+ * TITLE_FIT_MIN_SCORE threshold already decided which entries reach
+ * data/pipeline.md's Pending section at all. Re-gating at
+ * DOMAIN_FIT_GATE_THRESHOLD (calibrated for full JD text, not a title) here
+ * would wrongly null out most entries that already correctly passed the
+ * cheaper bar — this function only ranks what's already there.
+ *
+ * @param {{domainFit:number, heat?:number|null, layoffRisk?:number|null}} input
+ */
+export function computeInboxRank({ domainFit, heat = null, layoffRisk = null }) {
+  const stabilityScore = clamp0to100((heat ?? 50) - (layoffRisk ?? 0) + 50);
+  const rank = Math.round(clamp0to100(domainFit) * INBOX_RANK_WEIGHTS.domainFit + stabilityScore * INBOX_RANK_WEIGHTS.stability);
+  return { rank, stabilityScore };
+}
+
+// ── Combined per-posting scorer (CLI entry point) ───────────────────────────
+
+/**
+ * Pure function combining all four signals into one result — the `--score`
+ * CLI's actual logic, kept pure/injectable (fxRatesToInr, companySignal) so it
+ * stays unit-testable without network/file I/O. Every field independently
+ * degrades to `null` when its input is missing — never blocks, never
+ * estimates, same "null if unknown" contract signal-agent's `company_heat`
+ * already established.
+ *
+ * @param {{jdText?:string, compAmount?:number, compCurrency?:string, compKind?:'cash'|'public_equity'|'private_equity', indiaEntity?:boolean, mentionsEor?:boolean, fxRatesToInr?:Record<string,number>, companySignal?:{heat?:number, layoff_risk?:number}|null}} input
+ */
+export function scorePosting({
+  jdText,
+  locationText = '',
+  compAmount,
+  compCurrency = 'USD',
+  compKind = 'cash',
+  indiaEntity = false,
+  mentionsEor = false,
+  fxRatesToInr = FALLBACK_FX_TO_INR,
+  companySignal = null,
+} = {}) {
+  const domainFitScore = jdText ? scoreDomainFit(jdText) : null;
+
+  const effectiveValue = Number.isFinite(compAmount)
+    ? computeEffectiveValueINR({ amount: compAmount, currency: compCurrency, kind: compKind }, fxRatesToInr)
+    : null;
+  const compEffectiveValueInr = effectiveValue && !effectiveValue.excluded ? effectiveValue.netInr : null;
+
+  const hireabilityConfidence = scoreIndiaHireability({ jdText: jdText || '', locationText, companyHasIndiaEntity: indiaEntity, mentionsEOR: mentionsEor });
+  const geoEligibility = classifyGeoEligibility({ locationText, jdText: jdText || '' });
+
+  const heat = typeof companySignal?.heat === 'number' ? companySignal.heat : null;
+  const layoffRisk = typeof companySignal?.layoff_risk === 'number' ? companySignal.layoff_risk : null;
+
+  // The blended rank needs domain fit AND comp AND (optionally) stability —
+  // only compute it when the inputs that actually matter are present, rather
+  // than silently substituting defaults that would misrepresent an unscored
+  // signal as a neutral one.
+  let fitRank = null;
+  if (domainFitScore !== null && compEffectiveValueInr !== null) {
+    const blended = blendRank({
+      domainFit: domainFitScore,
+      netEffectiveValueInr: compEffectiveValueInr,
+      hireability: hireabilityConfidence,
+      heat: heat ?? 50,
+      layoffRisk: layoffRisk ?? 0,
+    });
+    fitRank = blended.excluded ? 0 : blended.rank;
+  }
+
+  return {
+    domain_fit_score: domainFitScore,
+    comp_effective_value_inr: compEffectiveValueInr,
+    india_hireability_confidence: hireabilityConfidence,
+    // Real tier + human-readable evidence, not just the blended number — so
+    // a report/UI can show WHY (e.g. "restricted: USA - Remote"), not just a
+    // black-box confidence figure. Never influences score/fit_rank beyond
+    // what india_hireability_confidence already contributes.
+    geo_eligibility: geoEligibility.tier,
+    geo_evidence: geoEligibility.evidence,
+    fit_rank: fitRank,
+  };
+}
+
+function clamp0to100(n) {
+  const v = Number(n);
+  if (!Number.isFinite(v)) return 0;
+  return Math.max(0, Math.min(100, v));
+}
+
+// ── Self-test ───────────────────────────────────────────────────────────────
+
+function assertEqual(actual, expected, label) {
+  const a = JSON.stringify(actual);
+  const e = JSON.stringify(expected);
+  if (a !== e) {
+    console.error(`FAIL ${label}\n  expected: ${e}\n  actual:   ${a}`);
+    process.exitCode = 1;
+  } else {
+    console.log(`PASS ${label}`);
+  }
+}
+
+function assert(cond, label) {
+  if (!cond) {
+    console.error(`FAIL ${label}`);
+    process.exitCode = 1;
+  } else {
+    console.log(`PASS ${label}`);
+  }
+}
+
+async function runSelfTest() {
+  // Tax slab sanity (not exact-law assertions — internal consistency only).
+  assertEqual(computeIndianTaxINR(1_000_000), 0, 'taxable income at/below rebate ceiling owes zero tax');
+  assert(computeIndianTaxINR(3_000_000) > 0, 'taxable income well above rebate ceiling owes some tax');
+  assert(computeIndianTaxINR(3_000_000) < 3_000_000, 'tax never exceeds the taxable income itself');
+  assert(computeIndianTaxINR(5_000_000) > computeIndianTaxINR(3_000_000), 'tax is monotonically increasing with income');
+
+  // Effective value: cash vs public equity vs private equity treatment.
+  const cash = computeEffectiveValueINR({ amount: 150_000, currency: 'USD', kind: 'cash' }, { USD: 87 });
+  assertEqual(cash.excluded, false, 'cash component is never excluded');
+  assertEqual(cash.grossInr, 150_000 * 87, 'cash FX conversion is exact');
+  assert(cash.netInr < cash.grossInr, 'net INR is less than gross after tax');
+
+  const publicEquity = computeEffectiveValueINR({ amount: 100_000, currency: 'USD', kind: 'public_equity' }, { USD: 87 });
+  assertEqual(publicEquity.weightedGrossInr, Math.round(100_000 * 87 * 0.5), 'public equity gets a 50% haircut before tax');
+
+  const privateEquity = computeEffectiveValueINR({ amount: 500_000, currency: 'USD', kind: 'private_equity' }, { USD: 87 });
+  assertEqual(privateEquity.excluded, true, 'private equity is excluded from ranked value');
+  assertEqual(privateEquity.netInr, null, 'private equity has no net value, informational only');
+
+  const total = computeTotalEffectiveValueINR(
+    [
+      { amount: 120_000, currency: 'USD', kind: 'cash' },
+      { amount: 40_000, currency: 'USD', kind: 'public_equity' },
+      { amount: 300_000, currency: 'USD', kind: 'private_equity' },
+    ],
+    { USD: 87 }
+  );
+  assert(total.excludedGrossInr === 300_000 * 87, 'total correctly separates excluded private-equity gross');
+  assert(total.netInr > 0, 'total nets cash + weighted public equity');
+
+  // India-hireability: weighted, never binary.
+  assert(scoreIndiaHireability({}) === 30, 'no evidence -> baseline confidence, not zero');
+  assert(scoreIndiaHireability({ companyHasIndiaEntity: true }) > scoreIndiaHireability({ mentionsEOR: true }), 'India entity evidence outweighs EOR mention alone');
+  assert(scoreIndiaHireability({ jdText: 'We hire globally via Deel.' }) > 30, 'EOR provider name in JD text is detected');
+  assert(
+    scoreIndiaHireability({ jdText: 'Open to candidates in the US, UK, and India.' }) > 30,
+    'eligible-countries-list mentioning India is detected'
+  );
+  // Real negative evidence must NOT be overridden by unrelated positive
+  // signals — an India entity doesn't make a US-citizens-only req viable.
+  assert(
+    scoreIndiaHireability({ jdText: 'Must be a US citizen due to federal contract requirements.', companyHasIndiaEntity: true }) < 30,
+    'explicit work-authorization restriction overrides an unrelated India-entity positive signal'
+  );
+
+  // ── classifyGeoEligibility: real taxonomy, grounded in this project's own
+  // scan-history.tsv values, not synthetic examples. ──
+  assert(classifyGeoEligibility({ locationText: 'Bengaluru, India' }).tier === 'india-eligible', 'real "Bengaluru, India" location -> india-eligible');
+  assert(classifyGeoEligibility({ locationText: 'IND-Pune EON Kharadi Infrastructure' }).tier === 'india-eligible', 'real Pune/IND office-code location -> india-eligible');
+  assert(classifyGeoEligibility({ locationText: 'Bangalore, IND; Hyderabad, IND; Mohali, IND; Pune, IND' }).tier === 'india-eligible', 'real multi-city IND-coded location -> india-eligible');
+  assert(classifyGeoEligibility({ locationText: 'Florida; Georgia; Indiana; New Jersey; New York, New York; Virginia' }).tier !== 'india-eligible', '"Indiana" (US state) must NOT false-positive as India (word-boundary regression test)');
+
+  assert(classifyGeoEligibility({ locationText: 'USA - Remote' }).tier === 'restricted', 'real "USA - Remote" location -> restricted, not treated as generically global');
+  assert(classifyGeoEligibility({ locationText: 'Canada - Remote AB' }).tier === 'restricted', 'real "Canada - Remote AB" location -> restricted');
+  assert(classifyGeoEligibility({ locationText: 'San Francisco, California' }).tier === 'restricted', 'a specific US city with no remote qualifier -> restricted, not unknown');
+
+  assert(classifyGeoEligibility({ locationText: 'Distributed' }).tier === 'global-remote', 'bare "Distributed" (no region qualifier) -> genuinely global-remote');
+  assert(classifyGeoEligibility({ locationText: 'Worldwide' }).tier === 'global-remote', '"Worldwide" -> global-remote');
+  assert(classifyGeoEligibility({ locationText: 'APAC - Distributed (Taiwan)' }).tier !== 'global-remote', 'region-QUALIFIED "distributed" (APAC/Taiwan) must NOT count as global -- real false-positive risk caught before shipping');
+  assert(classifyGeoEligibility({ locationText: 'US - Distributed' }).tier !== 'global-remote', 'region-qualified "US - Distributed" must NOT count as global either');
+
+  assert(classifyGeoEligibility({ locationText: 'Remote' }).tier === 'unknown', 'bare "Remote" with zero country info -> unknown, not assumed global or assumed restricted');
+  assert(classifyGeoEligibility({ locationText: 'SGP-Yishun' }).tier === 'restricted', 'real Workday 3-letter country code (SGP = Singapore, no spelled-out name) -> restricted, not unknown');
+  assert(classifyGeoEligibility({ locationText: 'IRL-Cork-Kavanagh House' }).tier === 'restricted', 'real Workday IRL code -> restricted');
+  assert(classifyGeoEligibility({ locationText: 'IND-Pune EON Kharadi Infrastructure' }).tier === 'india-eligible', 'IND code still wins over the Workday-country-code check (checked first)');
+
+  assert(
+    classifyGeoEligibility({ jdText: 'Must be a US citizen; active security clearance required.' }).tier === 'restricted',
+    'explicit work-authorization/clearance language in JD text -> restricted, even with no location field at all'
+  );
+  assert(
+    classifyGeoEligibility({ locationText: 'Remote', jdText: 'This position is not eligible for remote work outside the United States.' }).tier === 'restricted',
+    '"not eligible for remote work outside the US" JD language overrides an otherwise-ambiguous bare "Remote" location'
+  );
+
+  // Domain fit + gate.
+  assert(scoreDomainFit('Great ping pong table and free snacks, sales role.') < DOMAIN_FIT_GATE_THRESHOLD, 'irrelevant JD scores below the gate');
+  assert(scoreDomainFit('Build our Zero Trust VPN and endpoint encryption stack in C++, UEFI kernel driver work.') >= DOMAIN_FIT_GATE_THRESHOLD, 'on-domain JD clears the gate');
+
+  // Real-data regression: report 001's actual Broadcom JD text (fetched live
+  // from Workday's API, 2026-07-27) scored 12/20 under the original narrow
+  // keyword list — a real bug, not a synthetic example. The broadened list
+  // must clear the gate on this exact text.
+  const REAL_BROADCOM_JD = `Staff Security Engineer. Broadcom VMware Cloud Foundation (VCF) SCOPE team defends products, services and supply chains against nation state actors. Security Engineers responsible for triage, investigation, management and communication of security vulnerabilities reported by external researchers. Assess threats, analyze externally reported vulnerabilities, support teams providing vulnerability mitigations, virtual patches, workarounds, fix recommendations. Author VMware Security Response Center (vSRC) communications including security advisories. Use Claude Code or similar AI agentic coding tools. Design AI agentic workflows to triage and assess incoming reports. Build multi-step reasoning AI agents for autonomous static analysis, dynamic scanning, automated patch generation. Tools: Blackduck, Burp, Nessus, Coverity, vulnhub, GHSA, openwall. Assess OSS vulnerabilities for VCF products. Proficient in Python and at least one of C/C++ or Java. Bachelor's degree Computer Science and 8+ years experience or Masters and 6+ years.`;
+  const realBroadcomScore = scoreDomainFit(REAL_BROADCOM_JD);
+  assert(realBroadcomScore >= DOMAIN_FIT_GATE_THRESHOLD, `real Broadcom JD (was 12/20 under the old list) now clears the gate — got ${realBroadcomScore}`);
+
+  // Real-data regression: a clearly irrelevant title from the same live scan
+  // (data/pipeline-filtered.md) must still score near zero — confirms this is
+  // a real widening, not an accidental "let everything through."
+  assert(scoreDomainFit('Account Executive - Enterprise Sales, quota, CRM, customer relationship management') < DOMAIN_FIT_GATE_THRESHOLD, 'a real irrelevant sales title still scores below the gate after broadening');
+
+  // Word-boundary regression (2026-08-08): live-confirmed production false
+  // positives from substring matching — 'ios' hiding inside "biostatistics",
+  // 'driver' matching real logistics job titles. Structural fix must drop
+  // these to EXACTLY zero (not just "below the gate"), since the much lower
+  // TITLE_FIT_MIN_SCORE=1 title-triage gate is what these actually broke.
+  assertEqual(scoreDomainFit('Store Driver'), 0, '"driver" no longer matches inside a real logistics title (live production false positive)');
+  assertEqual(scoreDomainFit('CDL Delivery Truck Driver'), 0, '"driver" no longer matches inside a real CDL/trucking title (live production false positive)');
+  assertEqual(scoreDomainFit('Biostatistics Research Associate'), 0, '"ios" no longer matches hiding inside "biostatistics" (live production false positive, word-boundary fix)');
+  assertEqual(scoreDomainFit('Patriot Freight Group - Regional Driver'), 0, '"iot" does not match hiding inside "patriot" (same structural failure mode as ios/biostatistics, pre-empted before it was ever seen live)');
+  assertEqual(scoreDomainFit('Swift Transportation - CDL Driver'), 0, '"swift" (removed from the general tier) does not resurrect a match on the trucking company Swift Transportation');
+  // Genuinely on-domain titles must still pass after the boundary fix.
+  assert(scoreDomainFit('Kernel Driver Engineer') >= DOMAIN_FIT_GATE_THRESHOLD, '"kernel driver" (the compound phrase actually meant) still matches and clears the gate');
+  assert(scoreDomainFit('Device Driver Development Engineer') >= TITLE_FIT_MIN_SCORE, '"device driver"/"driver development" (the replacement moderate-tier phrases) still match');
+  assert(scoreDomainFit('iOS Security Engineer') >= TITLE_FIT_MIN_SCORE, '"ios" as its own real word (not hiding inside a longer word) still matches');
+
+  // Blend rank: domain gate excludes regardless of how good other signals are.
+  const gated = blendRank({ domainFit: 5, netEffectiveValueInr: 10_000_000, hireability: 100, heat: 100, layoffRisk: 0 });
+  assertEqual(gated.excluded, true, 'low domain fit excludes even a perfectly-paid, perfectly-hireable posting');
+
+  const ranked = blendRank({ domainFit: 80, netEffectiveValueInr: 3_000_000, hireability: 70, heat: 60, layoffRisk: 10 });
+  assertEqual(ranked.excluded, false, 'passing domain fit produces a real rank');
+  assert(ranked.rank > 0 && ranked.rank <= 100, 'rank is a 0-100 number');
+
+  const higherPay = blendRank({ domainFit: 80, netEffectiveValueInr: 5_500_000, hireability: 70, heat: 60, layoffRisk: 10 });
+  assert(higherPay.rank > ranked.rank, 'higher effective value increases rank, all else equal');
+
+  // FX fetch never throws even when the network call fails.
+  const fxFailing = await fetchFxRatesToInr({ fetchImpl: async () => { throw new Error('network down'); } });
+  assertEqual(fxFailing, FALLBACK_FX_TO_INR, 'fetchFxRatesToInr falls back to static table on failure, never throws');
+
+  // scorePosting(): full-data case — every field populated, fit_rank computed.
+  const fullScore = scorePosting({
+    jdText: 'Zero Trust VPN endpoint security engineer, C++, UEFI',
+    compAmount: 150_000,
+    compCurrency: 'USD',
+    compKind: 'cash',
+    fxRatesToInr: { USD: 87 },
+    companySignal: { heat: 70, layoff_risk: 10 },
+  });
+  assert(fullScore.domain_fit_score !== null && fullScore.domain_fit_score >= DOMAIN_FIT_GATE_THRESHOLD, 'scorePosting: on-domain JD produces a real domain_fit_score');
+  assert(fullScore.comp_effective_value_inr !== null && fullScore.comp_effective_value_inr > 0, 'scorePosting: comp produces a real net-INR value');
+  assert(typeof fullScore.india_hireability_confidence === 'number', 'scorePosting: hireability is always a number, never null (weighted baseline, not unknown-state)');
+  assert(fullScore.fit_rank !== null && fullScore.fit_rank > 0, 'scorePosting: fit_rank computed when domain fit + comp are both present');
+
+  const usOnlyScore = scorePosting({ jdText: 'Great security role. Must be a US citizen; active security clearance required.', locationText: 'USA - Remote' });
+  assert(usOnlyScore.geo_eligibility === 'restricted', 'scorePosting: geo_eligibility surfaces the real taxonomy tier, not just a blended number');
+  assert(typeof usOnlyScore.geo_evidence === 'string' && usOnlyScore.geo_evidence.length > 0, 'scorePosting: geo_evidence is a real human-readable string, always present');
+  assert(usOnlyScore.india_hireability_confidence < 30, 'scorePosting: explicit US-only evidence drags india_hireability_confidence below the old silent baseline');
+
+  // scorePosting(): comp missing -> comp_effective_value_inr and fit_rank are
+  // null, but domain_fit_score/hireability still compute (partial degrade).
+  const noComp = scorePosting({ jdText: 'Zero Trust VPN endpoint security engineer, C++, UEFI' });
+  assertEqual(noComp.comp_effective_value_inr, null, 'scorePosting: missing comp -> comp_effective_value_inr is null, not estimated');
+  assertEqual(noComp.fit_rank, null, 'scorePosting: missing comp -> fit_rank withheld rather than computed on an assumed default');
+  assert(noComp.domain_fit_score !== null, 'scorePosting: domain_fit_score still computes without a comp figure');
+
+  // scorePosting(): no JD text -> domain_fit_score null, fit_rank withheld.
+  const noJd = scorePosting({ compAmount: 100_000, compCurrency: 'USD', fxRatesToInr: { USD: 87 } });
+  assertEqual(noJd.domain_fit_score, null, 'scorePosting: missing JD text -> domain_fit_score is null, never defaulted to 0 and silently gated');
+  assertEqual(noJd.fit_rank, null, 'scorePosting: missing JD text -> fit_rank withheld');
+
+  // scorePosting(): company never signal-scored -> heat/layoffRisk default
+  // neutrally inside blendRank, never throws, never blocks fit_rank.
+  const noSignal = scorePosting({
+    jdText: 'Embedded kernel driver, endpoint encryption, C++',
+    compAmount: 100_000,
+    compCurrency: 'USD',
+    fxRatesToInr: { USD: 87 },
+    companySignal: null,
+  });
+  assert(noSignal.fit_rank !== null, 'scorePosting: an unscored company (no signal record) still produces a fit_rank via neutral heat/risk defaults');
+
+  // computeInboxRank(): no gate (filter-inbox-by-fit.mjs already gated at a
+  // much lower bar before an entry reaches this point), higher domain fit and
+  // better stability both increase rank, missing signal never throws.
+  const lowFitRank = computeInboxRank({ domainFit: 6 });
+  assert(lowFitRank.rank !== null && lowFitRank.rank > 0, 'computeInboxRank: low domain fit (below the JD-calibrated gate) still ranks, never nulled out');
+  const higherFitRank = computeInboxRank({ domainFit: 30 });
+  assert(higherFitRank.rank > lowFitRank.rank, 'computeInboxRank: higher domain fit increases rank, all else equal');
+  const goodStability = computeInboxRank({ domainFit: 20, heat: 90, layoffRisk: 0 });
+  const badStability = computeInboxRank({ domainFit: 20, heat: 10, layoffRisk: 80 });
+  assert(goodStability.rank > badStability.rank, 'computeInboxRank: better company stability increases rank, all else equal');
+  const neverScored = computeInboxRank({ domainFit: 20 });
+  assert(neverScored.rank !== null, 'computeInboxRank: a company with no stored signal (heat/layoffRisk both null) still ranks via neutral defaults');
+
+  if (process.exitCode === 1) {
+    console.error('\nSelf-test FAILED');
+  } else {
+    console.log('\nSelf-test PASSED');
+  }
+}
+
+// ── CLI ──────────────────────────────────────────────────────────────────────
+
+function parseArg(args, flag) {
+  const idx = args.indexOf(flag);
+  return idx !== -1 ? args[idx + 1] : undefined;
+}
+
+async function runScoreCli(args) {
+  const company = parseArg(args, '--company');
+  if (!company) {
+    console.error('Usage: node compute-fit.mjs --score --company "Name" [--jd-text "..." | --jd-text-file path] [--location-text "..."] [--comp-amount N --comp-currency USD --comp-kind cash] [--india-entity] [--mentions-eor]');
+    process.exitCode = 1;
+    return;
+  }
+
+  const locationText = parseArg(args, '--location-text') ?? '';
+  let jdText = parseArg(args, '--jd-text');
+  const jdTextFile = parseArg(args, '--jd-text-file');
+  if (!jdText && jdTextFile) {
+    try {
+      jdText = readFileSync(jdTextFile, 'utf-8');
+    } catch (err) {
+      console.error(`compute-fit: could not read --jd-text-file ${jdTextFile}: ${err.message}`);
+      process.exitCode = 1;
+      return;
+    }
+  }
+
+  const compAmountRaw = parseArg(args, '--comp-amount');
+  const compAmount = compAmountRaw !== undefined ? Number(compAmountRaw) : undefined;
+  const compCurrency = parseArg(args, '--comp-currency') ?? 'USD';
+  const compKind = parseArg(args, '--comp-kind') ?? 'cash';
+  const indiaEntity = args.includes('--india-entity');
+  const mentionsEor = args.includes('--mentions-eor');
+
+  const fxRatesToInr = compAmount !== undefined ? await fetchFxRatesToInr() : FALLBACK_FX_TO_INR;
+  const companySignal = readCompanySignal(company);
+
+  const result = scorePosting({ jdText, locationText, compAmount, compCurrency, compKind, indiaEntity, mentionsEor, fxRatesToInr, companySignal });
+  console.log(JSON.stringify(result, null, 2));
+}
+
+if (process.argv[1] && process.argv[1].endsWith('compute-fit.mjs')) {
+  const args = process.argv.slice(2);
+  if (args.includes('--self-test')) {
+    runSelfTest();
+  } else if (args.includes('--score')) {
+    runScoreCli(args);
+  } else {
+    console.log('Usage:');
+    console.log('  node compute-fit.mjs --self-test');
+    console.log('  node compute-fit.mjs --score --company "Name" [--jd-text "..." | --jd-text-file path] [--comp-amount N --comp-currency USD --comp-kind cash] [--india-entity] [--mentions-eor]');
+  }
+}
