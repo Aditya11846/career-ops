@@ -1,0 +1,98 @@
+# Career-Ops Profile Configuration — Amit Kumar Singh (Aditya's father)
+#
+# Encodes the resolved directions from .claude/notes/brainstorm-2026-07-26.md:
+# title-agnostic, comp-first (weighted, not a hard gate), borderless remote,
+# India-tax-resident effective-value comparison, India-hireability as a real
+# weighted signal (not assumed), company-stability as a soft down-rank.
+
+candidate:
+  full_name: "Amit Kumar Singh"
+  email: "amit_cal23@yahoo.com"
+  phone: "+91 9011015482"
+  wechat: ""
+  location: "India (remote only — see note below)"
+  linkedin: ""
+  portfolio_url: ""
+  github: ""
+  twitter: ""
+  photo: ""
+
+target_roles:
+  # Title is explicitly NOT a filter for this search (see title_filter in
+  # senior-search/watchlist.yml — left wide open on purpose). These are
+  # illustrative of the real archetype, not a whitelist.
+  primary:
+    - "Principal/Staff/Distinguished Software Engineer — Zero Trust / Endpoint Security"
+    - "Engineering Manager / Director — Security or Embedded Systems"
+  archetypes:
+    - name: "Zero Trust / Enterprise Access Security Engineer"
+      level: "Principal/Staff"
+      fit: "primary"
+    - name: "Endpoint Encryption / DLP Engineer"
+      level: "Principal/Staff"
+      fit: "primary"
+    - name: "Embedded/Kernel Systems Engineer"
+      level: "Principal/Staff"
+      fit: "secondary"
+    - name: "Engineering Manager (Security or Embedded org)"
+      level: "Senior Manager/Director"
+      fit: "secondary"
+    - name: "Speech/SDK Architecture Engineer"
+      level: "Principal/Staff"
+      fit: "adjacent"
+
+narrative:
+  headline: "22-year systems engineer — Zero Trust, endpoint encryption, embedded/kernel security"
+  exit_story: ""
+  superpowers:
+    - "Kernel/UEFI-level systems programming (Symantec Endpoint Encryption, TCG Opal V2)"
+    - "Zero Trust enterprise access security at scale (current-era Akamai work)"
+    - "Dual-track: senior IC depth AND engineering-management experience (led up to 15 engineers)"
+  proof_points: []
+
+# ── Comp — comp-first, effective-value in INR, not raw gross ───────────────
+#
+# Resolved direction: he'll remain India-tax-resident regardless of employer
+# country, so "effective value" = FX-convert any stated comp to INR, then run
+# through Indian income-tax slabs, producing one comparable net-INR number
+# across a US/Germany/anywhere posting alike. See senior-search/compute-fit.mjs.
+compensation:
+  target_range: "comp-first — no fixed target ceiling; ranked by effective net-INR value, not raw gross"
+  currency: "INR (effective value — see compute-fit.mjs)"
+  minimum: ""
+  location_flexibility: "Fully remote, any country — title and geography are not filters, only comp and domain fit"
+  effective_value_notes: >
+    Cash (base + guaranteed/target bonus) is the primary ranked number.
+    Public-company RSUs are counted at a ~50% haircut (volatility/vesting-cliff
+    risk). Private-company equity/options are informational only, NOT counted
+    in the ranked value — priority is reliable income after an 18-month gap,
+    not speculative upside.
+
+location:
+  country: "India"
+  city: "Pune"
+  timezone: "IST"
+  visa_status: "Not seeking relocation or a work visa — remote employment only, physically based in India"
+  onsite_availability: "None outside India. WITHIN India, hybrid based in Pune is acceptable (updated 2026-08-02) — do not treat an India-based hybrid-in-Pune posting as a geo mismatch. Hybrid/onsite requiring any other city, or any role outside India, is not viable."
+  # This is the single most important practical filter for this search, more
+  # important than comp: most "Remote" postings mean remote-within-country,
+  # not remote-from-anywhere. See senior-search/compute-fit.mjs's
+  # scoreIndiaHireability() — Permanent Establishment tax risk is the real
+  # reason many employers restrict remote hiring to India; EOR providers
+  # (Deel, Remote.com, Multiplier, Papaya, Rippling, Oyster) solve it and are
+  # the strongest positive signal short of the company already having an
+  # India entity.
+  india_hireability_note: "See senior-search/compute-fit.mjs scoreIndiaHireability() — weighted confidence, not a binary filter."
+
+language:
+  output: en
+
+spend_tier: standard
+
+cv:
+  output_format: "html"
+
+# No culture_screen, cover_letter, contact_preferences, or outreach blocks yet
+# — deliberately deferred per .claude/notes/relationship-pipeline-critique.md:
+# outreach for this search starts with a plain spreadsheet, not new tooling,
+# until 4+ weeks of real use shows the spreadsheet itself is the bottleneck.

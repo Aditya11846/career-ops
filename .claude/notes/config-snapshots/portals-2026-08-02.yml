@@ -1,0 +1,471 @@
+# portals.yml — Amit Kumar Singh's company watchlist
+#
+# Scanned by the standard scan.mjs (no isolation wrapper needed — this is the
+# only workspace in this checkout).
+#
+# Domain, per .claude/notes/brainstorm-2026-07-26.md's market-validated
+# direction: Zero Trust / enterprise access security, endpoint encryption/DLP,
+# embedded/kernel systems. Geography: none — borderless, comp-first.
+#
+# title_filter is deliberately left EMPTY: title doesn't matter for this
+# search (comp + domain fit do). Do not add title keywords here.
+title_filter:
+  positive: []
+  negative: []
+
+# location_filter is deliberately left EMPTY for the same reason — geography
+# is not a filter. India-hireability is scored separately as a weighted
+# confidence signal (senior-search/compute-fit.mjs), not a location block.
+location_filter:
+  always_allow: []
+  allow: []
+  block: []
+
+tracked_companies:
+  # ── Confirmed ATS (safe to enable) ──────────────────────────────────────
+  - name: Broadcom
+    # Owns Symantec's former enterprise-security product lines (Amit's own
+    # 2009-2018 employer, via acquisition). Confirmed on Workday during this
+    # session's research (broadcom.wd1.myworkdayjobs.com).
+    careers_url: "https://broadcom.wd1.myworkdayjobs.com/External_Career"
+    provider: workday
+    enabled: true
+    notes: "Confirmed Workday tenant during 2026-07-27 research session. Owns Symantec Endpoint Encryption/DLP lineage."
+
+  # ── Candidate companies — ATS NOT yet confirmed, disabled until verified ──
+  # Verify each company's actual careers-page ATS (Workday/Greenhouse/Ashby/
+  # Lever vs. none) before enabling — do not guess a careers_url/api. Flip
+  # `enabled: true` and fill in `provider`/`careers_url` once confirmed, or
+  # leave scan_method: websearch for an agent-handoff scan instead.
+
+  - name: Zscaler
+    careers_url: "https://job-boards.greenhouse.io/zscaler"
+    provider: greenhouse
+    enabled: true
+    notes: "Zero Trust — direct competitor to Amit's current-era Akamai work. Confirmed Greenhouse during 2026-07-28 research."
+
+  - name: Palo Alto Networks
+    # jobs.paloaltonetworks.com/en/search-jobs is large (1.2MB) but genuinely
+    # server-rendered — real <a href="/en/job/..."> links confirmed live in
+    # the raw HTML, not just via JS. Individual job pages carry schema.org
+    # JobPosting markup, confirmed live 2026-07-28.
+    careers_url: "https://jobs.paloaltonetworks.com/en/search-jobs"
+    provider: jsonld-jobposting
+    job_link_pattern: "/en/job/"
+    enabled: true
+    notes: "Zero Trust / Prisma Access. Confirmed schema.org JobPosting via listing-discovery during 2026-07-28 research — the page is large but not a JS shell, real links are server-rendered."
+
+  - name: Cloudflare
+    careers_url: "https://job-boards.greenhouse.io/cloudflare"
+    provider: greenhouse
+    enabled: true
+    notes: "Zero Trust product line. Confirmed Greenhouse (live API tested) during 2026-07-28 follow-up research — the earlier custom-portal guess was wrong."
+
+  - name: Netskope
+    # open-positions page is a JS shell loading Greenhouse's embed widget
+    # (for=netskope) — the underlying standard Greenhouse board API call was
+    # confirmed live 2026-07-28 (140 real postings), even though the page
+    # itself has no server-rendered links.
+    careers_url: "https://job-boards.greenhouse.io/netskope"
+    api: "https://boards-api.greenhouse.io/v1/boards/netskope/jobs"
+    provider: greenhouse
+    enabled: true
+    notes: "Zero Trust / SASE. Confirmed Greenhouse during 2026-07-28 research — the marketing page is a JS shell, but it's loading a standard Greenhouse board underneath."
+
+  - name: CrowdStrike
+    careers_url: "https://crowdstrike.wd5.myworkdayjobs.com/crowdstrikecareers"
+    provider: workday
+    enabled: true
+    notes: "Endpoint security. Confirmed Workday tenant during 2026-07-28 research."
+
+  - name: Check Point Software
+    enabled: false
+    notes: "Zero Trust + endpoint/disk encryption lineage overlap. Confirmed custom 'cpcareers' CMS at careers.checkpoint.com. Re-checked 2026-07-28: fetched a real live job page (joborderid=24651) — zero schema.org JobPosting markup either. Not scannable by any current provider, not just unconfirmed."
+    scan_method: websearch
+    scan_query: "Check Point Software careers principal staff engineer security"
+
+  - name: Ivanti
+    # The landing page (/company/careers) is marketing-only; the real listing
+    # lives one hop away at /company/careers/find — server-rendered with real
+    # links, confirmed live 2026-07-28. Individual job pages carry schema.org
+    # JobPosting markup (confirmed: Senior Offensive Security Engineer).
+    careers_url: "https://www.ivanti.com/company/careers/find"
+    provider: jsonld-jobposting
+    job_link_pattern: "/company/careers/job?gh_jid="
+    enabled: true
+    notes: "Zero Trust / endpoint management. Confirmed schema.org JobPosting via listing-discovery during 2026-07-28 research."
+
+  - name: Citrix
+    enabled: false
+    notes: "Zero Trust / enterprise access. Tenant/site slug (citrix.wd1.myworkdayjobs.com/CitrixCareers) reconfirmed correct via real live posting URLs on 2026-07-28 follow-up — the jobs API still returns HTTP 422 even with a browser User-Agent/Referer added. This is a deeper block (likely a missing session cookie or a changed API path for this specific tenant), not a wrong slug — needs real debugging (e.g. inspect actual network requests in a browser), not more guessing."
+    scan_method: websearch
+    scan_query: "Citrix careers principal staff engineer security engineering"
+
+  - name: Trellix
+    careers_url: "https://trellix.wd1.myworkdayjobs.com/EnterpriseCareers"
+    provider: workday
+    enabled: true
+    notes: "Endpoint/DLP lineage, direct overlap with Amit's Symantec DLP work. Renamed from 'McAfee (Trellix)' — McAfee's enterprise/security business merged into Trellix in 2021; Trellix is the current entity to track. Confirmed Workday tenant during 2026-07-28 research."
+
+  - name: Digital Guardian
+    # now "Fortra's Digital Guardian" (acquired) — standalone
+    # site 403s/redirects into fortra.com. The human-facing careers page is a
+    # JS shell, but its underlying Workday API works fine regardless (same as
+    # Broadcom) — confirmed live 2026-07-28, 35 real postings.
+    careers_url: "https://fortra.wd12.myworkdayjobs.com/FortraCareers"
+    provider: workday
+    enabled: true
+    notes: "DLP specialist. Confirmed Workday API during 2026-07-28 research — the marketing page looked like a dead end (JS shell, no links) but the actual jobs API works the same way Broadcom's does, independent of the page's own rendering."
+
+  - name: Proofpoint
+    # Found via the watchlist-widening pass (G2's DLP category page), not the
+    # original hand-picked list. Confirmed Workday during 2026-07-28 research,
+    # 168 real postings tested live via the API.
+    careers_url: "https://proofpoint.wd5.myworkdayjobs.com/ProofpointCareers"
+    provider: workday
+    enabled: true
+    notes: "DLP/enterprise security, direct Symantec DLP lineage overlap. Confirmed Workday API during 2026-07-28 watchlist-widening research."
+
+  - name: Sophos
+    # sophos.com/en-us/careers is just a marketing page linking out — the real
+    # board is a standard Lever board, confirmed live 2026-07-28.
+    careers_url: "https://jobs.lever.co/sophos"
+    provider: lever
+    enabled: true
+    notes: "Endpoint security. Confirmed Lever (jobs.lever.co/sophos) during 2026-07-28 research — the 'careers' page itself is just a marketing page that links out to it."
+
+  - name: Thales (CipherTrust)
+    careers_url: "https://thales.wd3.myworkdayjobs.com/Careers"
+    provider: workday
+    enabled: true
+    notes: "Encryption/data-protection lineage overlap with Symantec Endpoint Encryption work. Confirmed Workday tenant during 2026-07-28 research."
+
+  - name: Forcepoint
+    careers_url: "https://forcepoint.wd1.myworkdayjobs.com/external-careers"
+    provider: workday
+    enabled: true
+    notes: "DLP. Confirmed Workday tenant during 2026-07-28 research."
+
+  - name: Wind River
+    enabled: false
+    notes: "Embedded RTOS specialist — direct overlap with Amit's kernel/embedded background (VxWorks experience specifically). Re-checked 2026-07-28: actually uses Jobvite (jobs.jobvite.com/windriver, not one of the 4 supported providers), but that path currently redirects to Jobvite's own marketing site rather than a live job board — couldn't reach a real listing to confirm further."
+    scan_method: websearch
+    scan_query: "Wind River careers principal staff embedded systems engineer"
+
+  - name: Bosch
+    enabled: false
+    notes: "Automotive/industrial embedded — large employer, bridge required from security/encryption embedded work to automotive, not a direct line. Confirmed custom global portal at jobs.bosch.com. Re-checked 2026-07-28: the portal is a JS-rendered SPA shell with no job links in server-rendered HTML — couldn't extract a real posting URL to check for schema.org markup this pass."
+    scan_method: websearch
+    scan_query: "Bosch careers principal staff embedded systems engineer remote"
+
+  - name: Continental
+    # Not a true search-results listing (couldn't find one server-rendered) —
+    # points at a real, known job detail page, which itself carries a
+    # server-rendered "similar jobs" widget linking several OTHER live
+    # postings. providers/jsonld-jobposting.mjs's listing-discovery mode
+    # (job_link_pattern) follows those links too. Real coverage, but narrower
+    # than a full catalog scan — a handful of related postings per run, not
+    # every open role at Continental. Confirmed live 2026-07-28.
+    careers_url: "https://jobs.continental.com/en/detail-page/job-detail/REF94214D-p-d43f61f3e8578eefc3faa0c5f94d00ee/quality-engineer/"
+    provider: jsonld-jobposting
+    # NOT just "/detail-page/job-detail/" — the page also carries language-
+    # switcher links to the SAME job under every locale (cz/de/es-es/fr/...),
+    # which would eat the fetch budget on 14+ duplicates of one posting before
+    # reaching genuinely different ones. Scoped to /en/ specifically; found
+    # live 2026-07-28 by testing the unscoped pattern first and seeing this.
+    job_link_pattern: "/en/detail-page/job-detail/"
+    enabled: true
+    notes: "Automotive/industrial embedded — bridge required from security/encryption embedded work to automotive, not a direct line. Confirmed custom portal; no true search-results page found server-rendered, but individual job pages link several related postings via a 'similar jobs' widget, which the new listing-discovery provider mode follows."
+
+  - name: Siemens
+    enabled: false
+    notes: "Industrial embedded. 2026-07-28 research found no single unified careers tenant for core Siemens AG — its divisions (e.g. Siemens Gamesa, Siemens Healthineers) each run separate Workday tenants. Re-checked 2026-07-28: found a real, current job detail page (jobs.siemens.com/en_US/externaljobs/JobDetail/478743, a live Cybersecurity Intern posting) confirming it's a custom portal, not Workday — no schema.org markup present either."
+    scan_method: websearch
+    scan_query: "Siemens careers principal staff embedded systems engineer remote"
+
+  - name: secunet Security Networks
+    enabled: false
+    notes: "German VPN/Zero-Trust-adjacent government/enterprise security firm — cited as an example of 'relevant company anywhere,' not a Germany-specific priority. Confirmed during 2026-07-28 research: runs its own portal at jobs.secunet.com (also covers subsidiaries secunet international GmbH, stashcat GmbH), not one of the 4 supported providers."
+    scan_method: websearch
+    scan_query: "secunet Security Networks careers principal engineer VPN security"
+
+  - name: Twingate
+    careers_url: "https://jobs.lever.co/twingate"
+    provider: lever
+    enabled: true
+    notes: "Zero Trust Network Access startup. Confirmed Lever during 2026-07-28 research."
+
+  - name: ThreatLocker
+    careers_url: "https://job-boards.greenhouse.io/threatlocker"
+    provider: greenhouse
+    enabled: true
+    notes: "Zero Trust / endpoint allowlisting security vendor. Confirmed Greenhouse (live API, 33 real postings) during 2026-07-28 watchlist-widening research."
+
+  - name: Illumio
+    # Found via G2 Zero Trust Networking category research, not the original
+    # hand-picked list.
+    careers_url: "https://jobs.ashbyhq.com/illumio"
+    api: "https://api.ashbyhq.com/posting-api/job-board/illumio"
+    provider: ashby
+    enabled: true
+    notes: "Zero Trust microsegmentation — direct domain overlap. Confirmed Ashby API (62 real postings) during 2026-07-28 watchlist-widening pass."
+
+  - name: Cato Networks
+    # Found via ZTNA/SASE funding-news research, not the original hand-picked
+    # list.
+    careers_url: "https://www.catonetworks.com/careers/"
+    api: "https://boards-api.greenhouse.io/v1/boards/catonetworks/jobs"
+    provider: greenhouse
+    enabled: true
+    notes: "SASE / Zero Trust Network Access vendor. Confirmed Greenhouse API (129 real postings) during 2026-07-28 watchlist-widening pass."
+
+  - name: Okta
+    # Found via G2 Zero Trust Networking category research, not the original
+    # hand-picked list.
+    careers_url: "https://www.okta.com/company/careers/"
+    api: "https://boards-api.greenhouse.io/v1/boards/okta/jobs"
+    provider: greenhouse
+    enabled: true
+    notes: "Identity/Zero Trust enterprise access security. Confirmed Greenhouse API (362 real postings) during 2026-07-28 watchlist-widening pass."
+
+  - name: Menlo Security
+    # Found via G2 Zero Trust Networking category research, not the original
+    # hand-picked list.
+    careers_url: "https://www.menlosecurity.com/careers"
+    api: "https://api.ashbyhq.com/posting-api/job-board/menlosecurity"
+    provider: ashby
+    enabled: true
+    notes: "Browser isolation / Zero Trust enterprise access security. Confirmed Ashby API (19 real postings) during 2026-07-28 watchlist-widening pass."
+
+  - name: Tanium
+    # Found via ZTNA-adjacent endpoint-security research, not the original
+    # hand-picked list.
+    careers_url: "https://www.tanium.com/careers/"
+    api: "https://boards-api.greenhouse.io/v1/boards/tanium/jobs"
+    provider: greenhouse
+    enabled: true
+    notes: "Endpoint management/security, overlap with Amit's Symantec Endpoint Encryption/DLP lineage. Confirmed Greenhouse API (43 real postings) during 2026-07-28 watchlist-widening pass."
+
+  - name: Tailscale
+    # Found via ZTNA vendor comparison research, not the original hand-picked
+    # list.
+    careers_url: "https://tailscale.com/careers"
+    api: "https://boards-api.greenhouse.io/v1/boards/tailscale/jobs"
+    provider: greenhouse
+    enabled: true
+    notes: "Zero Trust mesh networking (WireGuard-based), direct domain overlap. Confirmed Greenhouse API (45 real postings) during 2026-07-28 watchlist-widening pass."
+
+  - name: Teleport
+    # Found via ZTNA vendor comparison research, not the original hand-picked
+    # list.
+    careers_url: "https://goteleport.com/careers/"
+    api: "https://api.ashbyhq.com/posting-api/job-board/goteleport"
+    provider: ashby
+    enabled: true
+    notes: "Zero Trust infrastructure access (identity-based, no VPN), direct domain overlap. Confirmed Ashby API (26 real postings) during 2026-07-28 watchlist-widening pass."
+
+  - name: Xage Security
+    # Found via Zero Trust microsegmentation/OT-IoT research, not the
+    # original hand-picked list.
+    careers_url: "https://xage.com/careers/"
+    api: "https://api.lever.co/v0/postings/xage-security?mode=json"
+    provider: lever
+    enabled: true
+    notes: "Zero Trust access/protection for critical infrastructure and IoT, overlap with embedded/kernel security archetype. Confirmed Lever API (10 real postings) during 2026-07-28 watchlist-widening pass."
+
+  - name: NetBird
+    # Found via Zero Trust remote access funding/market research, not the
+    # original hand-picked list.
+    careers_url: "https://netbird.io/careers"
+    api: "https://api.ashbyhq.com/posting-api/job-board/netbird"
+    provider: ashby
+    enabled: true
+    notes: "Open-source WireGuard-based Zero Trust network access, direct domain overlap. Confirmed Ashby API (11 real postings) during 2026-07-28 watchlist-widening pass."
+
+  - name: Cyberhaven
+    # Found via DLP/endpoint data protection market research, not the
+    # original hand-picked list.
+    careers_url: "https://www.cyberhaven.com/careers"
+    api: "https://api.ashbyhq.com/posting-api/job-board/cyberhaven"
+    provider: ashby
+    enabled: true
+    notes: "Endpoint DLP / insider risk, direct overlap with endpoint encryption/DLP archetype. Confirmed Ashby API (15 real postings, including a MacOS Endpoint role) during 2026-07-28 watchlist-widening pass."
+
+  - name: Nightfall AI
+    # Found via DLP vendor research, not the original hand-picked list.
+    careers_url: "https://nightfall.ai/careers"
+    api: "https://api.ashbyhq.com/posting-api/job-board/nightfall-ai"
+    provider: ashby
+    enabled: true
+    notes: "DLP platform with dedicated Endpoint team roles, direct overlap with endpoint encryption/DLP archetype. Confirmed Ashby API (20 real postings) during 2026-07-28 watchlist-widening pass."
+
+  - name: Sentra
+    # Found via data security/DSPM vendor research, not the original
+    # hand-picked list.
+    careers_url: "https://sentra.io/careers"
+    api: "https://api.ashbyhq.com/posting-api/job-board/sentra"
+    provider: ashby
+    enabled: true
+    notes: "Data security posture management (DSPM), adjacent to the endpoint encryption/DLP archetype. Confirmed Ashby API (3 real postings) during 2026-07-28 watchlist-widening pass."
+
+  - name: BigID
+    # Found via data security/privacy vendor research, not the original
+    # hand-picked list.
+    careers_url: "https://bigid.com/company/careers/"
+    api: "https://boards-api.greenhouse.io/v1/boards/bigid/jobs"
+    provider: greenhouse
+    enabled: true
+    notes: "Data intelligence/discovery and security platform, adjacent to the endpoint encryption/DLP archetype. Confirmed Greenhouse API (15 real postings) during 2026-07-28 watchlist-widening pass."
+
+  - name: JumpCloud
+    # Found via zero-trust/enterprise-access-security funding and vendor
+    # research, not the original hand-picked list.
+    careers_url: "https://jumpcloud.com/careers"
+    api: "https://api.lever.co/v0/postings/jumpcloud?mode=json"
+    provider: lever
+    enabled: true
+    notes: "Unified identity/device zero trust access platform, direct overlap with Amit's Zero Trust enterprise access archetype. Confirmed Lever API (17 real postings) during 2026-07-28 watchlist-widening pass."
+
+  - name: Delinea
+    # Found via privileged-access-management (PAM) vendor research, not the
+    # original hand-picked list.
+    careers_url: "https://delinea.com/careers"
+    api: "https://api.ashbyhq.com/posting-api/job-board/delinea"
+    provider: ashby
+    enabled: true
+    notes: "Privileged access management, zero trust enterprise access adjacent. Confirmed Ashby API (62 real postings) during 2026-07-28 watchlist-widening pass."
+
+  - name: BeyondTrust
+    # Found via privileged-access-management (PAM) vendor research, not the
+    # original hand-picked list.
+    careers_url: "https://www.beyondtrust.com/careers"
+    api: "https://boards-api.greenhouse.io/v1/boards/beyondtrust/jobs"
+    provider: greenhouse
+    enabled: true
+    notes: "Privileged access management, zero trust enterprise access adjacent. Confirmed Greenhouse API (50 real postings) during 2026-07-28 watchlist-widening pass."
+
+  - name: Britive
+    # Found via privileged-access-management (PAM) vendor research, not the
+    # original hand-picked list.
+    careers_url: "https://www.britive.com/careers"
+    api: "https://boards-api.greenhouse.io/v1/boards/britive/jobs"
+    provider: greenhouse
+    enabled: true
+    notes: "Cloud privileged access/identity security, zero trust enterprise access adjacent. Confirmed Greenhouse API (14 real postings) during 2026-07-28 watchlist-widening pass."
+
+  - name: Vectra AI
+    # Found via G2 Zero Trust Networking category research, not the
+    # original hand-picked list.
+    careers_url: "https://www.vectra.ai/about/jobs"
+    api: "https://boards-api.greenhouse.io/v1/boards/vectranetworks/jobs"
+    provider: greenhouse
+    enabled: true
+    notes: "Network detection and response underpinning zero trust continuous verification, overlap with Amit's Zero Trust enterprise access archetype. Confirmed Greenhouse API (24 real postings) during 2026-07-28 watchlist-widening pass."
+
+  - name: Saviynt
+    # Found via privileged-access-management (PAM) funding/market research,
+    # not the original hand-picked list.
+    careers_url: "https://saviynt.com/careers"
+    api: "https://api.lever.co/v0/postings/saviynt?mode=json"
+    provider: lever
+    enabled: true
+    notes: "Identity security/privileged access management platform (Gartner PAM Challenger), zero trust enterprise access adjacent. Confirmed Lever API (117 real postings) during 2026-07-28 watchlist-widening pass."
+
+  - name: SGNL
+    # Found via privileged-access-management (PAM) funding/market research,
+    # not the original hand-picked list.
+    careers_url: "https://sgnl.ai/careers/"
+    api: "https://api.ashbyhq.com/posting-api/job-board/sgnlai"
+    provider: ashby
+    enabled: true
+    notes: "Enterprise authorization/access-management platform (Series A, identity-first zero trust), direct overlap with Amit's Zero Trust enterprise access archetype. Confirmed Ashby API (5 real postings) during 2026-07-28 watchlist-widening pass."
+
+  - name: Material Security
+    # Found via endpoint/data protection vendor research, not the original
+    # hand-picked list.
+    careers_url: "https://material.security/careers"
+    api: "https://api.ashbyhq.com/posting-api/job-board/materialsecurity"
+    provider: ashby
+    enabled: true
+    notes: "Cloud office (email/Workspace/M365) account protection and data loss prevention, overlap with the endpoint encryption/DLP archetype. Confirmed Ashby API (6 real postings) during 2026-07-28 watchlist-widening pass."
+
+  - name: Nudge Security
+    # Found via zero-trust/enterprise-access-security market research, not
+    # the original hand-picked list.
+    careers_url: "https://www.nudgesecurity.com/"
+    api: "https://api.ashbyhq.com/posting-api/job-board/nudgesecurity"
+    provider: ashby
+    enabled: true
+    notes: "SaaS/AI security governance (identity- and access-driven shadow-IT discovery), zero trust enterprise access adjacent. Confirmed Ashby API (2 real postings) during 2026-07-28 watchlist-widening pass."
+
+  - name: Axonius
+    # Found via zero-trust/asset-visibility market research, not the
+    # original hand-picked list.
+    careers_url: "https://www.axonius.com/company/careers"
+    api: "https://boards-api.greenhouse.io/v1/boards/axonius/jobs"
+    provider: greenhouse
+    enabled: true
+    notes: "Cyber asset attack surface management (device/identity inventory underpinning zero trust), overlap with Amit's Zero Trust enterprise access archetype. Confirmed Greenhouse API (26 real postings) during 2026-07-28 watchlist-widening pass."
+
+# job_boards: turned on 2026-08-03 (brainstorm §21) — every one of these is
+# a REAL, already-built, zero-LLM-cost provider that was simply never
+# enabled. Company-watchlist scanning (tracked_companies above) stays
+# domain-fit/geo-fit filtered downstream exactly the same way; these add
+# genuine breadth (companies never in the curated list) rather than
+# replacing the curated approach. Each entry tested individually against a
+# real scan.mjs run before being trusted, not added blind.
+job_boards:
+  - name: RemoteOK
+    provider: remoteok
+    enabled: true
+    notes: "Board-wide remote-tech feed, zero-auth, no company curation needed. Enabled 2026-08-03 per brainstorm §21 — real code, never turned on before. Confirmed live: 100/100 raw postings correctly filtered out by domain-fit (0 relevant in the sample) — generic firehose, not security-specialized, but domain-fit gate handles the noise correctly. Keep on for breadth; expect low daily yield."
+
+  - name: Remotive
+    provider: remotive
+    enabled: true
+    notes: "Board-wide remote-jobs feed, independent coverage from RemoteOK. Enabled 2026-08-03."
+
+  - name: We Work Remotely
+    provider: weworkremotely
+    enabled: true
+    notes: "Long-established remote board (RSS feed). Enabled 2026-08-03."
+
+  - name: Himalayas
+    provider: himalayas
+    enabled: true
+    notes: "Modern remote job board. Enabled 2026-08-03."
+
+  - name: NoDesk
+    provider: nodesk
+    enabled: true
+    notes: "Remote-jobs RSS feed. Enabled 2026-08-03."
+
+  - name: Working Nomads
+    provider: workingnomads
+    enabled: true
+    notes: "Remote-jobs feed. Enabled 2026-08-03."
+
+  - name: Jobicy
+    provider: jobicy
+    enabled: true
+    notes: "Remote-jobs feed. Enabled 2026-08-03."
+
+  - name: Jobspresso
+    provider: jobspresso
+    enabled: true
+    notes: "Curated remote-jobs feed (public, no-auth). Enabled 2026-08-03."
+
+  - name: EchoJobs
+    provider: echojobs
+    enabled: false
+    notes: "Confirmed live 2026-08-03: returns HTTP 403 Forbidden (real bot-detection block, not a code bug). Left disabled honestly rather than pretending it works. Worth re-checking later in case the block is temporary/IP-based."
+
+  - name: HN Who's Hiring
+    provider: hackernews
+    enabled: true
+    notes: "Monthly Hacker News hiring thread — different population than formal ATS boards (small/technical-founder-led companies). Enabled 2026-08-03. Found + fixed 2 real bugs in providers/hackernews.mjs same day: (1) thread-search query wasn't reliably finding the real monthly thread (fixed: scope to author_whoishiring), (2) shared fallback URL was silently deduping ~270 real distinct postings down to 1 (fixed: each comment gets its own permalink). Real yield confirmed after fixes: 277 raw postings, 17 survived domain+geo filtering, including a genuinely close match (Senior Embedded Software Engineer, C/C++/Yocto/Bare Metal)."
+
+  - name: The Muse
+    provider: themuse
+    enabled: true
+    notes: "Broader job board with real enterprise company coverage. Enabled 2026-08-03. Confirmed live: slow (~3min, 1481 raw postings, heavily paginated) and mostly generic (SpaceX/Disney/Bank of America roles unrelated to security) — domain-fit gate filters correctly, but this is the slowest source of the batch. Keep for breadth given cron runs overnight anyway; worth revisiting if scan runtime becomes a problem."
