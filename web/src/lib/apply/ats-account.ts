@@ -176,7 +176,15 @@ export async function waitForVerificationEmail(loginDomain: string, email: strin
     throw new Error("ats-account: missing GMAIL_CLIENT_ID / GMAIL_CLIENT_SECRET / GMAIL_REFRESH_TOKEN in .env — required to read the verification email");
   }
 
-  const domainRoot = loginDomain.split(".").slice(-2).join(".");
+  // Zero-dependency domain match. Naively taking the last two labels
+  // collapses to the bare public suffix (e.g. "co.uk", "com.au") for any
+  // employer on a multi-label ccTLD, which would then accept a verification
+  // link from ANY unrelated same-suffix sender (#bug_013). Instead, accept
+  // only the full loginDomain or its immediate parent (one label up, so
+  // e.g. mail from "apply.acme.co.uk" still matches "careers.acme.co.uk").
+  const domainLabels = loginDomain.split(".");
+  const acceptedDomains = [loginDomain, ...(domainLabels.length > 2 ? [domainLabels.slice(1).join(".")] : [])];
+  const matchesAcceptedDomain = (from: string) => acceptedDomains.some((d) => from.endsWith(`@${d}`) || from.endsWith(`.${d}`));
 
   const getAccessToken = async (): Promise<string> => {
     const res = await fetch("https://oauth2.googleapis.com/token", {
@@ -204,7 +212,7 @@ export async function waitForVerificationEmail(loginDomain: string, email: strin
       const headers = msg.payload?.headers || [];
       if (!isAuthenticEmail(headers)) continue; // fail-closed on unauthenticated/spoofed mail
       const from = (headers.find((h: { name?: string }) => h.name?.toLowerCase() === "from")?.value || "").toLowerCase();
-      if (!from.includes(domainRoot)) continue;
+      if (!matchesAcceptedDomain(from)) continue;
       const links = extractUrls(getMessageBody(msg.payload)).filter((u: string) => /verify|confirm|activate/i.test(u));
       if (links.length) return links[0];
     }

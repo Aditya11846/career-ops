@@ -164,12 +164,25 @@ async function richestFrame(page: Page): Promise<Frame> {
   return best;
 }
 
-/** True once the current controls look like the REAL application form
- *  (resume/name/etc), not a login/signup/intermediate page — mirrors
- *  session.ts's looksLikeApplicationForm() heuristic at the candidate level
- *  so the model's own "ready_to_fill" call can be sanity-checked. */
+/** True once the current controls look like the REAL application form,
+ *  not a login/signup/intermediate page — mirrors session.ts's
+ *  looksLikeApplicationForm() heuristic at the candidate level so the
+ *  model's own "ready_to_fill" call can be sanity-checked.
+ *
+ *  Name fields alone are NOT sufficient evidence: most ATS signup/account
+ *  pages (Ashby, Lever, many Workday tenants) also ask for first/last name,
+ *  so a name-only check fires on step 1 of account creation and reports the
+ *  application as "reached" before an account even exists (#bug_022). Only
+ *  a signal unique to application forms (resume/CV upload, cover letter,
+ *  "why this role"), or a name field paired with another application-only
+ *  field, counts. */
 function candsLookLikeApplication(cands: Cand[]): boolean {
-  return cands.some((c) => /resume|résumé|\bcv\b|cover letter|first name|last name|full name/i.test(c.ctx || c.aria || c.placeholder || ""));
+  const text = (c: Cand) => c.ctx || c.aria || c.placeholder || "";
+  const hasUniqueAppSignal = cands.some((c) => /resume|résumé|\bcv\b|cover letter|why (this|you|are)/i.test(text(c)));
+  if (hasUniqueAppSignal) return true;
+  const hasName = cands.some((c) => /first name|last name|full name/i.test(text(c)));
+  const hasOtherAppField = cands.some((c) => /phone|linkedin|github|portfolio|sponsorship|relocat/i.test(text(c)));
+  return hasName && hasOtherAppField;
 }
 
 function candToField(c: Cand): ApplyField {
