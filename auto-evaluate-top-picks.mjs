@@ -37,9 +37,10 @@
  */
 
 import { readFileSync, existsSync, mkdirSync, appendFileSync, readdirSync } from 'fs';
-import { execFileSync } from 'child_process';
+import { execFileSync, execSync } from 'child_process';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { homedir } from 'os';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const PIPELINE_PATH = join(ROOT, 'data/pipeline.md');
@@ -51,9 +52,29 @@ const LOG_DIR = join(ROOT, '.claude/notes/cron-logs');
 // explicit choice 2026-08-03 (vs. the manual dashboard button's top 3).
 const AUTO_EVALUATE_TOP_N = 5;
 
-// Same absolute path used by scripts/cron-daily-scan.sh — launchd's PATH is
-// minimal and excludes both Homebrew and the user's ~/.local/bin.
-const CLAUDE_BIN = '/Users/adium/.local/bin/claude';
+// launchd's PATH is minimal and excludes both Homebrew and the user's
+// ~/.local/bin, so resolve `claude` explicitly instead of hardcoding one
+// machine's path (#bug_001, mirrors scan-and-process.mjs's resolver).
+function resolveClaudeBin() {
+  if (process.env.CLAUDE_BIN) return process.env.CLAUDE_BIN;
+  try {
+    return execSync('which claude', { encoding: 'utf-8' }).trim();
+  } catch {
+    // fall through to common install dirs
+  }
+  const home = homedir();
+  const candidates = [
+    join(home, '.local/bin/claude'),
+    join(home, '.npm-global/bin/claude'),
+    '/opt/homebrew/bin/claude',
+    '/usr/local/bin/claude',
+  ];
+  const found = candidates.find((p) => existsSync(p));
+  if (found) return found;
+  throw new Error('Cannot locate `claude` CLI. Set CLAUDE_BIN or add `claude` to PATH.');
+}
+
+const CLAUDE_BIN = resolveClaudeBin();
 
 const PENDING_MARKERS = ['## Pending', '## Pendientes'];
 

@@ -24,7 +24,7 @@ export PATH="/opt/homebrew/bin:$PATH"
 LOG_DIR=".claude/notes/cron-logs"
 mkdir -p "$LOG_DIR"
 LOG="$LOG_DIR/weekly-widen-$(date +%Y-%m-%d).log"
-CLAUDE=/Users/adium/.local/bin/claude
+CLAUDE="${CLAUDE_BIN:-$(command -v claude || echo "$HOME/.local/bin/claude")}"
 
 PROMPT='You are widening career-ops'"'"' company watchlist (portals.yml), headless, on the user'"'"'s own machine. This is the SAME real-verification standard used throughout this project'"'"'s history — a company is only ever added with a CONFIRMED, LIVE, working config. Never guess a careers_url, never add a company with an unconfirmed ATS.
 

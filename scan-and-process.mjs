@@ -29,9 +29,10 @@
  */
 
 import { readFileSync, existsSync, mkdirSync, appendFileSync, readdirSync } from 'fs';
-import { execFileSync } from 'child_process';
+import { execFileSync, execSync } from 'child_process';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { homedir } from 'os';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const PIPELINE_PATH = join(ROOT, 'data/pipeline.md');
@@ -42,9 +43,29 @@ const LOG_DIR = join(ROOT, '.claude/notes/cron-logs');
 // promising offers are always the ones that consume tokens.
 const SCAN_PROCESS_TOP_N = 20;
 
-// Same absolute path used by scripts/cron-daily-scan.sh — launchd/PM2 PATHs are
-// minimal and exclude both Homebrew and the user's ~/.local/bin.
-const CLAUDE_BIN = '/Users/adium/.local/bin/claude';
+// launchd/PM2 PATHs are minimal and exclude both Homebrew and the user's
+// ~/.local/bin, so `claude` on bare $PATH often isn't found — resolve it
+// explicitly instead of hardcoding one machine's path (#bug_001).
+function resolveClaudeBin() {
+  if (process.env.CLAUDE_BIN) return process.env.CLAUDE_BIN;
+  try {
+    return execSync('which claude', { encoding: 'utf-8' }).trim();
+  } catch {
+    // fall through to common install dirs
+  }
+  const home = homedir();
+  const candidates = [
+    join(home, '.local/bin/claude'),
+    join(home, '.npm-global/bin/claude'),
+    '/opt/homebrew/bin/claude',
+    '/usr/local/bin/claude',
+  ];
+  const found = candidates.find((p) => existsSync(p));
+  if (found) return found;
+  throw new Error('Cannot locate `claude` CLI. Set CLAUDE_BIN or add `claude` to PATH.');
+}
+
+const CLAUDE_BIN = resolveClaudeBin();
 
 // Hard per-eval bound: a hung `claude -p` must not stall the whole drain.
 const PER_EVAL_TIMEOUT_MS = 240_000;
