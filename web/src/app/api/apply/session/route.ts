@@ -1,5 +1,6 @@
 import path from "node:path";
 import { openSession } from "@/lib/apply/session";
+import { resolveEffectiveCli } from "@/lib/clis";
 import { careerOpsRoot } from "@/lib/career-ops";
 
 export const runtime = "nodejs";
@@ -28,7 +29,11 @@ export async function POST(req: Request) {
   const platform = (body.platform ?? "").trim();
   const storageStatePath = TIER2_PLATFORMS.has(platform) ? path.join(careerOpsRoot(), "apply-agent/session-store", `${platform}.json`) : undefined;
   try {
-    const session = await openSession(url, body.cliId, body.agent, body._noApplyBtn, storageStatePath);
+    // The browser's localStorage cliId is only a hint — resolve authoritatively
+    // server-side so an empty/missing cliId (Config never saved) can't silently
+    // disable the agentic handoff and cause the browser to open-then-close.
+    const cliId = resolveEffectiveCli(body.cliId);
+    const session = await openSession(url, cliId, body.agent, body._noApplyBtn, storageStatePath);
     return Response.json(session);
   } catch (e) {
     return Response.json({ error: e instanceof Error ? e.message.slice(0, 200) : "could not open the form" }, { status: 500 });

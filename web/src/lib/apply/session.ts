@@ -1,4 +1,5 @@
 import { existsSync } from "node:fs";
+import net from "node:net";
 import { chromium, type Browser, type BrowserContext, type Page, type Frame, type Response } from "playwright-core";
 import { extractForm, type ApplyField, type ExtractedForm } from "./extract";
 import { parseGreenhouse, fetchGreenhouseSchema } from "./greenhouse";
@@ -120,24 +121,57 @@ declare global {
   var __coHeadedBrowser: Browser | undefined;
   // eslint-disable-next-line no-var
   var __coIdleTimer: ReturnType<typeof setTimeout> | undefined;
+  /** Chrome DevTools Protocol port the headed browser listens on — lets a
+   *  spawned agentic CLI attach to the SAME live browser via Playwright MCP's
+   *  --cdp-endpoint (live-agent.ts's runAgenticReach). Chosen once per server
+   *  process, alongside the browser singleton. */
+  // eslint-disable-next-line no-var
+  var __coCdpPort: number | undefined;
+}
+
+/** Bind a random OS-assigned port and return it (immediately free — race is
+ *  acceptable here: the CDP listener is opened by the same process a moment
+ *  later, and a collision is vanishingly unlikely with >30k ephemeral ports). */
+function pickFreePort(): Promise<number> {
+  const srv = net.createServer();
+  return new Promise<number>((resolve, reject) => {
+    srv.once("error", reject);
+    srv.listen(0, "127.0.0.1", () => {
+      const addr = srv.address() as net.AddressInfo;
+      srv.close(() => resolve(addr.port));
+    });
+  });
+}
+
+/** Port the headed Chrome exposes for CDP, launching it if needed. */
+export async function getCdpPort(): Promise<number> {
+  if (globalThis.__coCdpPort) return globalThis.__coCdpPort;
+  globalThis.__coCdpPort = await pickFreePort();
+  return globalThis.__coCdpPort;
 }
 const SESSIONS: Map<string, Session> = (globalThis.__coApplySessions ??= new Map());
 
 async function headedBrowser(): Promise<Browser> {
   const b = globalThis.__coHeadedBrowser;
   if (b && b.isConnected()) return b;
+  // Open the DevTools Protocol listener BEFORE launch so an agentic CLI can
+  // attach to this exact browser (live-agent.ts's runAgenticReach) — the page
+  // the user already sees is the page the model drives, same cookies/state.
+  const port = await getCdpPort();
+  const cdpArg = `--remote-debugging-port=${port}`;
+  const baseArgs = ["--window-position=-3200,-3200", "--window-size=1280,940", cdpArg]; // off-screen during fill; moved on-screen at handoff
   let nb: Browser;
   try {
     nb = await chromium.launch({
       channel: "chrome",
       headless: false,
-      args: ["--window-position=-3200,-3200", "--window-size=1280,940"], // off-screen during fill; moved on-screen at handoff
+      args: baseArgs,
     });
   } catch {
     // No system Google Chrome → fall back to Playwright's bundled Chromium if
     // present; otherwise a clear, actionable error.
     try {
-      nb = await chromium.launch({ headless: false, args: ["--window-position=-3200,-3200", "--window-size=1280,940"] });
+      nb = await chromium.launch({ headless: false, args: baseArgs });
     } catch {
       throw new Error("The apply feature needs Google Chrome. Install Chrome (or run: npx playwright install chromium) and try again.");
     }

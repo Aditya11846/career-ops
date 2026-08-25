@@ -1,9 +1,10 @@
 import type { Frame, Page } from "playwright-core";
-import { existsSync, mkdirSync, appendFileSync } from "node:fs";
+import { existsSync, mkdirSync, appendFileSync, writeFileSync, unlinkSync, readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { resolveCli } from "@/lib/clis";
 import { careerOpsRoot } from "@/lib/career-ops";
 import { runPlanner } from "./agent-interpret";
+import { getCdpPort } from "./session";
 import { dropNewTabs } from "./diagnose";
 import { getCredentials, initCredentials, markStatus } from "./ats-credentials";
 import {
@@ -41,7 +42,7 @@ import type { DriveStep } from "./issue";
 // not authored by the LLM.
 // ─────────────────────────────────────────────────────────────────────────────
 
-const MAX_STEPS = 15;
+const MAX_STEPS = 45;
 
 export type LiveAgentResult = { reached: boolean; turns: number; reason: string };
 
@@ -55,6 +56,7 @@ type Action =
   | { action: "fill_text"; candN: number; value: string }
   | { action: "check_consent"; candN: number }
   | { action: "wait_for_email" }
+  | { action: "wait_for_page" }
   | { action: "ready_to_fill" }
   | { action: "blocked"; reason: string };
 
@@ -108,17 +110,25 @@ async function captureLiveCandidates(frame: Frame): Promise<Cand[]> {
   });
 }
 
-function buildDecidePrompt(company: string, role: string, cands: Cand[], hasEmail: boolean, hasCreds: boolean, history: string[]): string {
+type CredState = "none" | "just-created" | "active";
+
+function buildDecidePrompt(company: string, role: string, cands: Cand[], hasEmail: boolean, credState: CredState, history: string[]): string {
   const lines = cands
     .map((c) => `[${c.n}] tag=${c.tag} type=${c.type}${c.req ? " required" : ""}${c.name ? ` name="${c.name}"` : ""}${c.placeholder ? ` placeholder="${c.placeholder}"` : ""}${c.aria ? ` aria="${c.aria}"` : ""}${c.opts.length ? ` options=[${c.opts.slice(0, 12).join(" | ")}]` : ""} | context: "${c.ctx}"`)
     .join("\n");
-  return `You are driving a real browser toward one goal: reach and fill out the job application form for "${role}" at "${company}". Some employer sites require signing in or creating an account first — you may need to create one.
 
-Facts available to you (values are NOT shown to you — reference them only by name):
-- candidate email: ${hasEmail ? "available" : "NOT available — cannot create an account or log in"}
-- existing saved credentials for this employer: ${hasCreds ? "available (email + password already saved)" : "not available yet"}
+  const credSituation =
+    credState === "active"
+      ? `You have a confirmed working account for this employer (email + password saved from a previous session). If the page asks you to sign in, do it — use fill_email then fill_existing_password then click the sign-in button.`
+      : credState === "just-created"
+      ? `You just created a new account for this employer during this session (you filled the email, generated a password, and submitted the registration form). The page may now be showing a sign-in form — that is the expected next step. Sign in using the same email (fill_email) and the password you just created (fill_existing_password), then click the sign-in button. Do NOT try to create another account.`
+      : `No account exists yet for this employer. If the page shows a sign-in wall, look for a "Create Account", "Sign Up", or "Register" link/button and click it — do not fill a sign-in form you have no credentials for.`;
 
-IMPORTANT: if no existing credentials are available and the current page is a SIGN IN form (asking to log into an account you don't have), do NOT fill it — click "Create Account" / "Sign Up" / "Register" instead, wherever that link/button is. Only fill a Sign In form's fields when existing credentials ARE available.
+  return `You are driving a real browser toward one goal: reach and fill out the job application form for "${role}" at "${company}". Some employer sites require signing in or creating an account first.
+
+Facts (values are never shown — reference by name only):
+- candidate email: ${hasEmail ? "available" : "NOT available — cannot proceed with account creation or login"}
+- credential situation: ${credSituation}
 
 CONTROLS ON THE CURRENT PAGE:
 ${lines || "(no interactive controls found)"}
@@ -126,13 +136,14 @@ ${lines || "(no interactive controls found)"}
 Decide EXACTLY ONE next action. Return ONLY a JSON object, no prose, no code fence, one of:
 {"action":"click","candN":<n>}
 {"action":"fill_email","candN":<n>}
-{"action":"fill_new_password","candN":<n>}          // only when creating a NEW account
-{"action":"fill_existing_password","candN":<n>}      // only when existing credentials are available
-{"action":"fill_text","candN":<n>,"value":"<text>"}  // any other benign text field (e.g. a name field some signups ask for)
-{"action":"check_consent","candN":<n>}                // a Terms/Privacy consent checkbox blocking signup
-{"action":"wait_for_email"}                            // you just submitted a signup form and expect a verification email
-{"action":"ready_to_fill"}                              // this page IS the actual job application form now (has resume/first name/last name/etc fields) — stop here, a separate step fills it
-{"action":"blocked","reason":"<why>"}                   // a real CAPTCHA, MFA challenge, or genuinely no way to proceed
+{"action":"fill_new_password","candN":<n>}           // only when creating a NEW account for the first time
+{"action":"fill_existing_password","candN":<n>}       // when you have credentials (active OR just-created) and need to sign in
+{"action":"fill_text","candN":<n>,"value":"<text>"}   // any other benign text field (e.g. a name field some signups ask for)
+{"action":"check_consent","candN":<n>}                 // a Terms/Privacy consent checkbox blocking signup
+{"action":"wait_for_email"}                             // you just submitted a signup form and expect a verification email
+{"action":"wait_for_page"}                               // a button looks disabled — pause 3s for async validation before retrying
+{"action":"ready_to_fill"}                               // this page IS the actual job application form (resume, name, cover letter fields) — stop here
+{"action":"blocked","reason":"<why>"}                    // a real CAPTCHA, MFA challenge, or genuinely no way forward
 
 Steps taken so far this run:
 ${history.length ? history.join("\n") : "(none yet)"}`;
@@ -178,7 +189,11 @@ async function richestFrame(page: Page): Promise<Frame> {
  *  field, counts. */
 function candsLookLikeApplication(cands: Cand[]): boolean {
   const text = (c: Cand) => c.ctx || c.aria || c.placeholder || "";
-  const hasUniqueAppSignal = cands.some((c) => /resume|résumé|\bcv\b|cover letter|why (this|you|are)/i.test(text(c)));
+  // Only INPUT-like elements count as unique signals — a <button>Autofill with Resume</button>
+  // on a Workday splash page must NOT fire this, or the agent exits at step 0 before clicking
+  // "Apply Manually" / "Apply" and never runs a single LLM decision (#bug_workday_splash).
+  const isField = (c: Cand) => !["button", "a"].includes(c.tag);
+  const hasUniqueAppSignal = cands.some((c) => isField(c) && /resume|résumé|\bcv\b|cover letter|why (this|you|are)/i.test(text(c)));
   if (hasUniqueAppSignal) return true;
   const hasName = cands.some((c) => /first name|last name|full name/i.test(text(c)));
   const hasOtherAppField = cands.some((c) => /phone|linkedin|github|portfolio|sponsorship|relocat/i.test(text(c)));
@@ -216,6 +231,178 @@ function traceStep(runId: string, s: DriveStep & { rawDecision?: unknown }): voi
   appendFileSync(p, JSON.stringify({ runId, timestamp: new Date().toISOString(), ...s }) + "\n");
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// AGENTIC PATH (claude only) — one genuine multi-turn session per apply attempt.
+//
+// The hybrid loop above re-invokes a stateless CLI once per step with a CLOSED
+// action enum plus our own DOM-candidate list; that's what failed on real
+// Workday tenants (the candidate list comes back empty mid-render and the model
+// has to guess what page it's on from the enum). Here the model holds a real
+// tool loop: Playwright MCP attached to the very page session.ts already opened
+// (via its remote-debugging-port), giving it browser_snapshot/click/type/wait/
+// screenshot, plus a private secret MCP server that writes email/password into
+// the focused field — the values never enter the model's prompt or transcript.
+// No static heuristic decides what a page "is"; the model decides from what it
+// actually observes.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const AGENTIC_MAX_TURNS = 60;
+
+type AgenticCtx = {
+  page: Page;
+  url: string;
+  title: string;
+  employer: string;
+  slug: string;
+  loginDomain: string;
+  email: string;
+  role: string;
+  runId: string;
+  emit: (s: DriveStep & { rawDecision?: unknown }) => void;
+};
+
+/** The whole decision lives in prose — no fixed action enum. The model is told
+ *  the one invariant (secrets come only via the secret tools) and otherwise
+ *  free to read the page, click around, and decide what to do, exactly like a
+ *  person. */
+function buildAgenticPrompt(ctx: AgenticCtx, credState: CredState): string {
+  const secrets =
+    credState === "active"
+      ? "You have a confirmed working account for this employer (email + saved password). If the page asks you to sign in, click the email field → fill_focused_email, click the password field → fill_focused_existing_password, then click the sign-in button. Do NOT create another account."
+      : credState === "just-created"
+      ? "A password was already generated for this employer (an earlier attempt may be mid-flight). If the page is a signup/registration form, keep filling it — click each field, then fill_focused_email / fill_focused_new_password. If the page instead shows a sign-in form, sign in with fill_focused_existing_password. Never create two accounts."
+      : "No account exists yet for this employer. If the page shows a sign-in wall, find and click a 'Create Account' / 'Sign Up' / 'Register' link. When creating an account, fill the email with fill_focused_email and the password with fill_focused_new_password (a password is ready for you — never type one yourself).";
+
+  return `You are driving a real browser toward ONE goal: reach the real job application form for "${ctx.role}" at ${ctx.employer}. (You started at: ${ctx.url})
+
+How to work:
+1. Start with browser_snapshot to see the page. Use browser_click, browser_type, browser_navigate, browser_wait_for, and browser_take_screenshot to move around and investigate. The form may live in an iframe — check across frames if a page looks empty.
+2. Many employer sites gate the application form behind sign-in or account creation. Decide ON THE SPOT what the page requires — there are no fixed rules.
+3. To fill a field: click it first with a browser tool (that focuses it), THEN call the matching secret tool — it writes the value into the focused field. Never type email/password values yourself.
+4. ${secrets}
+5. After submitting an account-creation form that triggers an activation email, call await_verification_email — it waits for the email, opens its activation link, and returns "activated".
+6. The goal is REACHED only when the page is the actual job application form (resume/CV upload, personal details, cover letter, 'why this role' — NOT a login, signup, splash, or intermediate page). Then call signal_reached_application_form and stop.
+7. If you hit a genuine blocker (CAPTCHA, MFA, verified dead-end), call signal_blocked with a specific reason and stop. Do NOT call it just because a snapshot looks momentarily empty — wait for render (browser_wait_for) and screenshot to investigate first.`;
+}
+
+/** Writes the temp --mcp-config JSON declaring EXACTLY the two servers this
+ *  run needs (paired with --strict-mcp-config so no user/project MCP servers
+ *  leak in). Returns the path; caller unlinks it in a finally. */
+function writeAgenticMcpConfig(o: { runId: string; cdpEndpoint: string; email: string; newPassword: string | null; existingPassword: string | null; loginDomain: string; slug: string }): string {
+  const secretEntry = join(careerOpsRoot(), "web", "src", "lib", "apply", "secret-mcp-server.ts");
+  const config = {
+    mcpServers: {
+      playwright: {
+        type: "stdio",
+        command: "npx",
+        args: ["--yes", "@playwright/mcp@latest", "--cdp-endpoint", o.cdpEndpoint],
+      },
+      secret: {
+        type: "stdio",
+        command: "node",
+        args: ["--disable-warning=MODULE_TYPELESS_PACKAGE_JSON", secretEntry],
+        env: {
+          SECRET_CDP_ENDPOINT: o.cdpEndpoint,
+          SECRET_EMAIL: o.email,
+          SECRET_NEW_PASSWORD: o.newPassword || "",
+          SECRET_EXISTING_PASSWORD: o.existingPassword || "",
+          SECRET_LOGIN_DOMAIN: o.loginDomain,
+          SECRET_RESULT_PATH: join(careerOpsRoot(), "data", `ats-agent-result-${o.runId}.json`),
+          SECRET_CREDS_PATH: join(careerOpsRoot(), "data", "ats-credentials", `${o.slug}.json`),
+        },
+      },
+    },
+  };
+  const path = join(careerOpsRoot(), "data", `ats-mcp-${o.runId}.json`);
+  writeFileSync(path, JSON.stringify(config, null, 2), "utf8");
+  return path;
+}
+
+function readAgentSignal(runId: string): { reached: boolean; reason: string; detail: string } | null {
+  const p = join(careerOpsRoot(), "data", `ats-agent-result-${runId}.json`);
+  try {
+    if (!existsSync(p)) return null;
+    return JSON.parse(readFileSync(p, "utf8")) as { reached: boolean; reason: string; detail: string };
+  } catch {
+    return null;
+  }
+}
+
+/** Main agentic entry: spawn one claude session wired to Playwright MCP (CDP)
+ *  + the secret server, wait for the terminal signal file, promote creds on
+ *  success, and always clean up the temp config (it embeds secrets). */
+async function runAgenticReach(ctx: AgenticCtx): Promise<LiveAgentResult> {
+  const { page, url, employer, slug, loginDomain, email, role, runId, emit } = ctx;
+
+  // Pre-stage the credential state + passwords BEFORE spawning so the model's
+  // secret tools have values the moment it calls them. Idempotent: a partial
+  // prior attempt's record is reused (same password) instead of fragmented.
+  let creds = getCredentials(slug);
+  let credState: CredState;
+  let newPassword: string | null = null;
+  let existingPassword: string | null = null;
+  if (creds?.status === "active") {
+    credState = "active";
+    existingPassword = creds.password;
+  } else {
+    if (!creds) creds = initCredentials(slug, employer, loginDomain, email);
+    newPassword = creds.password;
+    credState = creds.status === "verified" ? "just-created" : "none";
+  }
+
+  const port = await getCdpPort();
+  const cdpEndpoint = `http://127.0.0.1:${port}`;
+  const mcpConfigPath = writeAgenticMcpConfig({ runId, cdpEndpoint, email, newPassword, existingPassword, loginDomain, slug });
+  const resultPath = join(careerOpsRoot(), "data", `ats-agent-result-${runId}.json`);
+
+  try {
+    emit({ turn: 0, action: "start", detail: `Starting a genuine agentic session — the model now drives the live browser directly (${role} @ ${employer}) with real snapshots and tools, up to ${AGENTIC_MAX_TURNS} turns.` });
+
+    const resolved = resolveCli("claude");
+    if (!resolved) {
+      emit({ turn: 0, action: "stuck", detail: "Claude CLI not found — the agentic apply path requires it." });
+      return { reached: false, turns: 0, reason: "no-claude" };
+    }
+
+    const out = await runPlanner(resolved.binPath, true, resolved.spec.args, buildAgenticPrompt(ctx, credState), {
+      mcpConfigPath,
+      outputFormat: "json",
+      maxTurns: AGENTIC_MAX_TURNS,
+    });
+
+    // Best-effort turn count from the CLI's JSON result (e.g. 30 → report it);
+    // fall back to 1 so the UI still shows "1 step" for a clean session.
+    const turnsMatch = /"total_turns"\s*:\s*(\d+)/.exec(out);
+    const turns = turnsMatch ? Number(turnsMatch[1]) : 1;
+
+    const sig = readAgentSignal(runId);
+    if (sig?.reached) {
+      if (creds.status !== "active") markStatus(slug, "active"); // just-created → reusable via fast-login next time
+      logAccountStep({ employer, employerSlug: slug, email, step: "application_filled", detail: `agentic session reached the application form (${turns} turns)` });
+      emit({ turn: turns, action: "reached", detail: sig.detail || "The model reached the real application form.", thumb: await shot(page) });
+      return { reached: true, turns, reason: "reached" };
+    }
+    if (sig) {
+      logAccountStep({ employer, employerSlug: slug, email, step: "failed", detail: `blocked: ${sig.detail}` });
+      emit({ turn: turns, action: "blocked", detail: sig.detail, thumb: await shot(page) });
+      return { reached: false, turns, reason: "blocked" };
+    }
+    const detail = "The agentic session ended without reaching the application form or reporting a blocker (turn budget exhausted, a parse failure, or an early exit).";
+    logAccountStep({ employer, employerSlug: slug, email, step: "failed", detail });
+    emit({ turn: turns, action: "stuck", detail, thumb: await shot(page) });
+    return { reached: false, turns, reason: "no-result" };
+  } finally {
+    // The temp config embeds secrets — always remove it and any leftover signal.
+    for (const p of [mcpConfigPath, resultPath]) {
+      try {
+        if (existsSync(p)) unlinkSync(p);
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+}
+
 export async function runLiveAgent(page: Page, frame: Frame, url: string, title: string, cliId: string, emit: (s: DriveStep) => void): Promise<LiveAgentResult> {
   const { employer, slug, loginDomain } = employerFromPage(url, title);
   const email = loadCandidateEmail();
@@ -239,6 +426,14 @@ export async function runLiveAgent(page: Page, frame: Frame, url: string, title:
     return { reached: ok, turns: 1, reason: ok ? "fast-login" : "fast-login-failed" };
   }
 
+  // claude gets the genuine agentic path (one multi-turn MCP tool session over
+  // CDP — the redesign). Other CLIs keep the hybrid loop below: codex/gemini
+  // have no confirmed non-interactive MCP tool-loop story yet, and a clean
+  // result either way beats a silent failure.
+  if (cliId === "claude") {
+    return runAgenticReach({ page, url, title, employer, slug, loginDomain, email, role, runId, emit: emitAndTrace });
+  }
+
   let curFrame = frame;
   const history: string[] = [];
   let newPassword: string | null = null;
@@ -248,12 +443,16 @@ export async function runLiveAgent(page: Page, frame: Frame, url: string, title:
     const cands = await captureLiveCandidates(curFrame).catch(() => [] as Cand[]);
 
     if (candsLookLikeApplication(cands)) {
+      // If we just signed in with freshly created creds, promote to "active"
+      // so the next run uses fast-login instead of re-creating the account.
+      if (newPassword !== null && creds && creds.status !== "active") markStatus(slug, "active");
       logAccountStep({ employer, employerSlug: slug, email, step: "application_filled", detail: `reached application form after ${step} step(s)` });
       emitAndTrace({ turn: step, action: "reached", detail: `Reached the real application form after ${step} step(s).`, thumb: await shot(page) });
       return { reached: true, turns: step, reason: "reached" };
     }
 
-    const prompt = buildDecidePrompt(employer, role, cands, true, creds?.status === "active", history);
+    const credState: CredState = creds?.status === "active" ? "active" : newPassword !== null ? "just-created" : "none";
+    const prompt = buildDecidePrompt(employer, role, cands, true, credState, history);
     const act = await decide(cliId, prompt);
     traceStep(runId, { turn: step, action: "decision", detail: JSON.stringify(act), rawDecision: act });
     if (!act) {
@@ -295,7 +494,16 @@ export async function runLiveAgent(page: Page, frame: Frame, url: string, title:
       continue;
     }
 
-    // Field/click actions target a captured candidate by index.
+    // wait_for_page needs no target element — handle it before the candN guard.
+    if (act.action === "wait_for_page") {
+      history.push(`step ${step}: waited 3s for async validation`);
+      emitAndTrace({ turn: step, action: "wait_for_page", detail: "Waiting 3 s for page async validation (e.g. server-side email check before button enables)…" });
+      await page.waitForTimeout(3000);
+      curFrame = await richestFrame(page);
+      continue;
+    }
+
+    // All other actions target a candidate by index.
     const cand = cands.find((c) => c.n === act.candN);
     if (!cand) {
       const detail = `Model chose ${act.action} on candidate [${act.candN}], but that index isn't in this step's observed controls (${cands.length ? cands.map((c) => c.n).join(",") : "none"}) — candidate numbering is recomputed fresh every step, so a stale reference from an earlier step's history silently does nothing.`;
@@ -366,17 +574,17 @@ export async function runLiveAgent(page: Page, frame: Frame, url: string, title:
       history.push(`step ${step}: ${ok ? "filled" : "FAILED to fill"} new password into [${cand.n}] "${label}"${confirmNote}`);
       emitAndTrace({ turn: step, action: ok ? "fill" : "fill-failed", detail: ok ? `Filled new password into "${label}"${confirmNote}.` : `Tried to fill new password into "${label}" but it didn't land.` });
     } else if (act.action === "fill_existing_password") {
-      // "created"/"verified" means a signup attempt started but was never
-      // confirmed to have actually worked on the employer's side — not safe
-      // to treat as a real, usable login. Only "active" (a prior successful
-      // login) counts.
-      if (creds?.status !== "active") {
-        history.push(`step ${step}: fill_existing_password requested but no CONFIRMED working credentials exist — skipped`);
+      // Use active saved password, or fall back to the password we just
+      // generated this run (post-creation sign-in on Workday/Greenhouse etc).
+      const pw = creds?.status === "active" ? creds.password : newPassword;
+      if (!pw) {
+        history.push(`step ${step}: fill_existing_password requested but no password available (not active, none generated yet) — skipped`);
         continue;
       }
-      const ok = await actuateField(curFrame, field, creds.password);
-      history.push(`step ${step}: ${ok ? "filled" : "FAILED to fill"} existing password into [${cand.n}] "${label}"`);
-      emitAndTrace({ turn: step, action: ok ? "fill" : "fill-failed", detail: ok ? `Filled saved password into "${label}".` : `Tried to fill saved password into "${label}" but it didn't land.` });
+      const pwLabel = creds?.status === "active" ? "saved" : "newly created";
+      const ok = await actuateField(curFrame, field, pw);
+      history.push(`step ${step}: ${ok ? "filled" : "FAILED to fill"} ${pwLabel} password into [${cand.n}] "${label}"`);
+      emitAndTrace({ turn: step, action: ok ? "fill" : "fill-failed", detail: ok ? `Filled ${pwLabel} password into "${label}".` : `Tried to fill ${pwLabel} password into "${label}" but it didn't land.` });
     } else if (act.action === "fill_text") {
       const ok = await actuateField(curFrame, field, act.value);
       history.push(`step ${step}: ${ok ? "filled" : "FAILED to fill"} text into [${cand.n}] "${label}"`);

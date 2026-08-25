@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { resolveCli } from "@/lib/clis";
+import { resolveEffectiveCli, resolveCli } from "@/lib/clis";
 import { careerOpsRoot, readMemory } from "@/lib/career-ops";
 import { getSession } from "@/lib/apply/session";
 
@@ -120,8 +120,11 @@ export async function POST(req: Request) {
 
       const s = sessionId ? getSession(sessionId) : undefined;
       if (!s) return fail("apply session not found (it may have expired)");
-      const resolved = cliId ? resolveCli(cliId) : null;
-      if (!resolved) return fail(`CLI '${cliId}' not found on this machine`);
+      // Server-authoritative CLI selection — an empty browser cliId must not
+      // short-circuit prefill (it would error "CLI '' not found" and close).
+      const effectiveCli = resolveEffectiveCli(cliId);
+      const resolved = effectiveCli ? resolveCli(effectiveCli) : null;
+      if (!resolved) return fail(`CLI '${effectiveCli ?? cliId}' not found on this machine`);
       const { spec, binPath } = resolved;
 
       const fieldsList = s.fields
@@ -142,9 +145,9 @@ For each field give the best answer:
 Output ONLY a compact JSON object mapping each field id → {"value": "...", "needs_confirmation": boolean}. No prose, no markdown, no code fence.`;
 
       log(`Form: "${s.title}" · ${s.fields.length} fields · prompt ${prompt.length} chars · memory ${mem.length} chars`);
-      log(`Planner: ${cliId} (${binPath})`);
+      log(`Planner: ${effectiveCli} (${binPath})`);
 
-      const isClaude = cliId === "claude";
+      const isClaude = effectiveCli === "claude";
       // --strict-mcp-config with no --mcp-config = load ZERO MCP servers → much
       // faster startup (skips the user's global playwright/gmail/linear/… servers
       // the planner doesn't need; it only reads local files).

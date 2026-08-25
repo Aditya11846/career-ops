@@ -79,12 +79,64 @@ Return ONLY a JSON array, no prose, no code fence:
 [{"n":0,"skip":false,"label":"First Name","type":"text","options":[],"required":true}, ...]`;
 }
 
-export function runPlanner(binPath: string, isClaude: boolean, argsFor: (p: string) => string[], prompt: string): Promise<string> {
-  const args = isClaude ? ["-p", prompt, "--permission-mode", "acceptEdits", "--strict-mcp-config", "--allowedTools", "Read", "--disallowedTools", "Bash,Write,Edit,NotebookEdit,Task,WebFetch,WebSearch"] : argsFor(prompt);
+export type PlannerOpts = {
+  /** Path to a temp --mcp-config JSON declaring ONLY the servers this run needs
+   *  (paired with --strict-mcp-config so no user/project MCP servers load).
+   *  When present, this run becomes a genuine agentic session (tool-use loop)
+   *  instead of the default zero-tool classify call. */
+  mcpConfigPath?: string;
+  permissionMode?: string;
+  allowedTools?: string;
+  disallowedTools?: string;
+  maxTurns?: number;
+  outputFormat?: "text" | "json";
+  /** Per-step stdout callback for stream-json turn events (live UI progress). */
+  onData?: (chunk: string) => void;
+};
+
+function buildClaudeArgs(prompt: string, opts?: PlannerOpts): string[] {
+  if (!opts?.mcpConfigPath) {
+    // Locked-down classify/interpret: zero tools, MCP disabled. acceptEdits
+    // only ever auto-approves file edits — nothing here can touch the network.
+    return ["-p", prompt, "--permission-mode", "acceptEdits", "--strict-mcp-config", "--allowedTools", "Read", "--disallowedTools", "Bash,Write,Edit,NotebookEdit,Task,WebFetch,WebSearch"];
+  }
+  // Genuine agentic session: the model drives the LIVE browser (Playwright MCP
+  // over CDP) + the secret store, and nothing else. --bare skips project hooks/
+  // plugins/CLAUDE.md so the subprocess can't pick up extra tools or prompts;
+  // --strict-mcp-config + --mcp-config loads ONLY the two servers declared in
+  // the temp config; --disallowedTools is the hard boundary (bypassPermissions
+  // is required for MCP tools to execute headless — allowed/disallowed lists
+  // keep its blast radius to browser + secret tools only).
+  const args = [
+    "-p",
+    prompt,
+    "--bare",
+    "--permission-mode",
+    opts.permissionMode ?? "bypassPermissions",
+    "--strict-mcp-config",
+    "--mcp-config",
+    opts.mcpConfigPath,
+    "--max-turns",
+    String(opts.maxTurns ?? 40),
+    "--allowedTools",
+    opts.allowedTools ?? "mcp__playwright__*,mcp__secret__*",
+    "--disallowedTools",
+    opts.disallowedTools ?? "Bash,Read,Write,Edit,WebFetch,WebSearch,Task,NotebookEdit",
+  ];
+  if (opts.outputFormat) args.push("--output-format", opts.outputFormat);
+  return args;
+}
+
+export function runPlanner(binPath: string, isClaude: boolean, argsFor: (p: string) => string[], prompt: string, opts?: PlannerOpts): Promise<string> {
+  const args = isClaude ? buildClaudeArgs(prompt, opts) : argsFor(prompt);
   return new Promise((resolve) => {
     const child = spawn(binPath, args, { cwd: careerOpsRoot(), env: process.env, stdio: ["ignore", "pipe", "pipe"] });
     let buf = "";
-    child.stdout.on("data", (d: Buffer) => (buf += d.toString()));
+    child.stdout.on("data", (d: Buffer) => {
+      const s = d.toString();
+      buf += s;
+      opts?.onData?.(s);
+    });
     child.stderr.on("data", () => {});
     const killer = setTimeout(() => {
       try {
@@ -92,7 +144,7 @@ export function runPlanner(binPath: string, isClaude: boolean, argsFor: (p: stri
       } catch {
         /* ignore */
       }
-    }, 150_000);
+    }, 300_000);
     child.on("close", () => {
       clearTimeout(killer);
       resolve(buf);

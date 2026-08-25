@@ -1,4 +1,4 @@
-import type { Frame, Page } from "playwright-core";
+import type { Frame, Locator, Page } from "playwright-core";
 import { existsSync, mkdirSync, appendFileSync, readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import yaml from "js-yaml";
@@ -53,6 +53,46 @@ function cssAttr(v: string): string {
   return v.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 }
 
+/** Core actuation primitive: fill a resolved DOM element (locator) with a
+ *  value, verifying it actually landed. Shared by actuateField() (app-side,
+ *  targets a data-co-field-tagged element) and the secret MCP server
+ *  (standalone process, targets document.activeElement) — the two codebases
+ *  can't statically import across the toolchain boundary, so each builds a
+ *  Locator and delegates to this.
+ *
+ *  Some Workday/custom-component inputs don't register a bare .fill() as a
+ *  real interaction unless the field is focused first (their own JS
+ *  validation listens for real focus/input events). Click to focus, fill,
+ *  then verify the value actually landed — fall back to character-by-
+ *  character typing if it didn't, same fallback the combobox path above uses. */
+export async function actuateLocator(loc: Locator, page: Page, field: Pick<ApplyField, "type" | "combobox">, value: string): Promise<boolean> {
+  try {
+    if (field.type === "checkbox") {
+      await loc.click();
+      return true;
+    }
+    if (field.type === "select" || field.combobox) {
+      await loc.click();
+      await page.waitForTimeout(150);
+      await loc.pressSequentially(value, { delay: 15 }).catch(async () => {
+        await page.keyboard.type(value);
+      });
+      return true;
+    }
+    await loc.click({ timeout: 3000 }).catch(() => {});
+    await loc.fill(value);
+    if ((await loc.inputValue().catch(() => "")) !== value) {
+      await loc.fill("").catch(() => {});
+      await loc.pressSequentially(value, { delay: 15 }).catch(async () => {
+        await page.keyboard.type(value);
+      });
+    }
+    return (await loc.inputValue().catch(() => "")) === value;
+  } catch {
+    return false;
+  }
+}
+
 /** Fills a captured field via its data-co-field tag (same tagging
  *  agentInterpretForm() already applies), mirroring fillSession()'s
  *  actuation primitive. Consent checkboxes ARE ticked here — this session's
@@ -62,32 +102,7 @@ function cssAttr(v: string): string {
 export async function actuateField(frame: Frame, field: ApplyField, value: string): Promise<boolean> {
   try {
     const loc = frame.locator(`[data-co-field="${cssAttr(field.id)}"]`).first();
-    if (field.type === "checkbox") {
-      await loc.click();
-      return true;
-    }
-    if (field.type === "select" || field.combobox) {
-      await loc.click();
-      await frame.page().waitForTimeout(150);
-      await loc.pressSequentially(value, { delay: 15 }).catch(async () => {
-        await frame.page().keyboard.type(value);
-      });
-      return true;
-    }
-    // Some Workday/custom-component inputs don't register a bare .fill() as a
-    // real interaction unless the field is focused first (their own JS
-    // validation listens for real focus/input events). Click to focus, fill,
-    // then verify the value actually landed — fall back to character-by-
-    // character typing if it didn't, same fallback the combobox path above uses.
-    await loc.click({ timeout: 3000 }).catch(() => {});
-    await loc.fill(value);
-    if ((await loc.inputValue().catch(() => "")) !== value) {
-      await loc.fill("").catch(() => {});
-      await loc.pressSequentially(value, { delay: 15 }).catch(async () => {
-        await frame.page().keyboard.type(value);
-      });
-    }
-    return (await loc.inputValue().catch(() => "")) === value;
+    return await actuateLocator(loc, frame.page(), field, value);
   } catch {
     return false;
   }

@@ -38,9 +38,34 @@ export function useApply(): ApplyCtx {
 }
 
 const CONFIG_KEY = "career-ops:config";
-function cliId(): string | null {
+
+/** LocalStorage cliId is only written by the Config page's Save button — if it
+ *  was never saved, every agentic handoff silently lost its CLI. The backend is
+ *  now authoritative (resolveEffectiveCli), but the client still needs a non-null
+ *  id for its own gates (prefill / fill-escalation), so this self-heals: read the
+ *  stored hint, and on empty/missing, ask the server for the first installed CLI
+ *  (Claude preferred) and persist it back so the Config page agrees. */
+async function resolveCliId(): Promise<string | null> {
   try {
-    return JSON.parse(localStorage.getItem(CONFIG_KEY) || "{}").cliId || null;
+    const stored = JSON.parse(localStorage.getItem(CONFIG_KEY) || "{}").cliId;
+    if (stored) return stored as string;
+  } catch {
+    /* fall through to server-side resolution */
+  }
+  try {
+    const r = await fetch("/api/clis", { cache: "no-store" });
+    const d = (await r.json()) as { clis?: { id: string; installed: boolean }[] };
+    const installed = (d.clis ?? []).filter((c) => c.installed);
+    const chosen = installed.find((c) => c.id === "claude")?.id || installed[0]?.id || null;
+    if (chosen) {
+      try {
+        const prev = JSON.parse(localStorage.getItem(CONFIG_KEY) || "{}");
+        localStorage.setItem(CONFIG_KEY, JSON.stringify({ ...prev, cliId: chosen }));
+      } catch {
+        /* non-fatal — the backend resolves anyway */
+      }
+    }
+    return chosen;
   } catch {
     return null;
   }
@@ -76,7 +101,7 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
   const drive = useCallback(async (id: string) => {
     setDriveSteps([]);
     try {
-      const r = await fetch("/api/apply/drive", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessionId: id, cliId: cliId(), goal: "reach" }) });
+      const r = await fetch("/api/apply/drive", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessionId: id, cliId: await resolveCliId(), goal: "reach" }) });
       if (!r.body) {
         setError("The agent couldn't start.");
         setStatus("error");
@@ -140,7 +165,7 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
     companyRef.current = opts?.company ?? "";
     pendingPrefill.current = false;
     try {
-      const r = await fetch("/api/apply/session", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url: u, cliId: cliId() }) });
+      const r = await fetch("/api/apply/session", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url: u, cliId: await resolveCliId() }) });
       const d = await r.json();
       if (d.error) {
         setError(d.error);
@@ -168,8 +193,9 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
 
   const prefill = useCallback(async () => {
     if (!sessionId.current) return;
-    if (!cliId()) {
-      setError("Configure a CLI in Config first, then pre-fill from your CV.");
+    const cli = await resolveCliId();
+    if (!cli) {
+      setError("No coding CLI detected on this machine — install one (e.g. Claude Code) and configure it in Config, then pre-fill from your CV.");
       return;
     }
     setStatus("prefilling");
@@ -186,7 +212,7 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
       setMeta(m);
     };
     try {
-      const r = await fetch("/api/apply/prefill", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessionId: sessionId.current, cliId: cliId() }) });
+      const r = await fetch("/api/apply/prefill", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessionId: sessionId.current, cliId: cli }) });
       if (!r.body) {
         setError("Couldn't pre-fill — no response stream.");
         setStatus("ready");
@@ -279,7 +305,8 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
       const okCount = (d.steps ?? []).filter((s: FillStep) => s.ok).length;
       const total = (d.steps ?? []).length;
       const mismatch = (d.issues ?? []).some((i: ApplyIssue) => i.code === "fill-mismatch");
-      if (cliId() && total > 0 && (okCount === 0 || (mismatch && okCount < total / 2))) {
+      const cli = await resolveCliId();
+      if (cli && total > 0 && (okCount === 0 || (mismatch && okCount < total / 2))) {
         await agentFillRef.current();
       }
     } catch {
@@ -300,7 +327,7 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
     setError("");
     setStatus("filling");
     try {
-      const r = await fetch("/api/apply/drive", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessionId: sessionId.current, cliId: cliId(), goal: "full", answers: ans }) });
+      const r = await fetch("/api/apply/drive", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessionId: sessionId.current, cliId: await resolveCliId(), goal: "full", answers: ans }) });
       if (!r.body) {
         setError("The agent couldn't start filling.");
         setStatus("error");

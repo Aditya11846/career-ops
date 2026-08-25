@@ -2,6 +2,7 @@ import { getSession, finalizeDrivenSession, extractCurrent, isApplicationFormFn,
 import { driveSession } from "@/lib/apply/drive";
 import { runLiveAgent } from "@/lib/apply/live-agent";
 import { classifyEmpty } from "@/lib/apply/diagnose";
+import { resolveEffectiveCli } from "@/lib/clis";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -17,9 +18,12 @@ export async function POST(req: Request) {
   } catch {
     return Response.json({ error: "bad json" }, { status: 400 });
   }
-  const { sessionId, cliId = "", goal = "reach", answers } = body;
+  const { sessionId, cliId: cliHint = "", goal = "reach", answers } = body;
   const s = sessionId ? getSession(sessionId) : undefined;
   if (!s) return Response.json({ error: "apply session not found (it may have expired)" }, { status: 404 });
+  // Same hardening as /api/apply/session: trust the installed CLI, not the
+  // browser's localStorage hint (empty cliId must not disable the agent loop).
+  const cliId = resolveEffectiveCli(cliHint) ?? "";
 
   const encoder = new TextEncoder();
   const stream = new ReadableStream<Uint8Array>({

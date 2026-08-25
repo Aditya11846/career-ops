@@ -97,3 +97,15 @@ export function resolveCli(id: string): { spec: CliSpec; binPath: string } | nul
   if (!binPath) return null;
   return { spec, binPath };
 }
+
+/** Pick the CLI id that should drive an agentic run (apply session open, drive
+ *  loop, prefill). The browser sends its localStorage cliId as a *hint*, but
+ *  the backend is authoritative: if the hint is missing or names a CLI that
+ *  isn't actually installed, fall back to the first installed CLI (Claude
+ *  preferred — drive.ts's explore mode only supports claude). Returns
+ *  undefined only when no CLI is installed at all. */
+export function resolveEffectiveCli(requested?: string | null): string | undefined {
+  if (requested && resolveCli(requested)) return requested;
+  const installed = detectClis().filter((c) => c.installed);
+  return installed.find((c) => c.id === "claude")?.id || installed[0]?.id || undefined;
+}
