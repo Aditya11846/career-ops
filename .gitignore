@@ -148,6 +148,10 @@ plan/
 # Cron automation runtime logs (generated, machine-local)
 .claude/notes/cron-logs/
 
+# Config snapshots hold the user's full CV/profile/contact data (PII) —
+# kept as local-only recovery copies, never in the public repo.
+.claude/notes/config-snapshots/
+
 apply-agent/session-store/*.json
 apply-agent/session-store/.profile-copy-*/
 

@@ -93,7 +93,7 @@ claude-only agentic v1 · `bypassPermissions` scoped by allow/disallow lists · 
 
 - `/tmp/nextdev.log` — dev-server request timings (session 27.5s, drive 75s).
 - `data/ats-account-log.jsonl` — per-run account-step trace (2026-08-24 CrowdStrike failure + 2026-08-25 Trellix blocked-with-Gmail-reason).
-- `data/ats-credentials/{broadcom,crowdstrike,trellix}.json` — account-creation attempts with `amit_cal23@yahoo.com`.
+- `data/ats-credentials/{broadcom,crowdstrike,trellix}.json` — account-creation attempts with `[REDACTED]`.
 - Memory trail: claude-mem obs #584, #617-627, #628-656 (parent has full list).
 
 ---
@@ -112,7 +112,7 @@ claude-only agentic v1 · `bypassPermissions` scoped by allow/disallow lists · 
 ## Where We're Going (unchanged from parent)
 
 1. **Commit + push** the working tree (user explicitly asked). Run GitNexus `impact`/`detect_changes` first per CLAUDE.md (wasn't done during implementation).
-2. **Unblock Gmail OAuth** — hand `setup-gmail-oauth.mjs` to the human (Aditya/Amit, whoever owns `amit_cal23@yahoo.com`): create Google Cloud OAuth Desktop client (enable Gmail API; redirect `http://127.0.0.1:53682/oauth2callback`), run script, approve, restart dev server.
+2. **Unblock Gmail OAuth** — hand `setup-gmail-oauth.mjs` to the human (Aditya/Amit, whoever owns `[REDACTED]`): create Google Cloud OAuth Desktop client (enable Gmail API; redirect `http://127.0.0.1:53682/oauth2callback`), run script, approve, restart dev server.
 3. **Finish the in-flight Broadcom test** via `/apply` (`https://broadcom.wd1.myworkdayjobs.com/External_Career/job/USA-TX-Plano-Legacy-Drive-Suite-700/Cyber-Security-Engineer_R026429`).
 4. **Re-run CrowdStrike** (original failure case) via `/apply`.
 5. **Iterate to 10 end-to-end passes**; diagnose each failure from `/tmp/nextdev.log` + `data/ats-account-log.jsonl` + UI reason; patch; re-run.

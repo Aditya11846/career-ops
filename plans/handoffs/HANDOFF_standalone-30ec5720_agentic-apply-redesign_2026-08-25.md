@@ -121,9 +121,9 @@ Standing operational directive (unchanged, governs everything): **design → tes
 ### ats-account-log.jsonl tail (primary evidence of both old failure and new success)
 
 ```
-{"timestamp":"2026-08-24T13:21:15.130Z","employer":"crowdstrike","email":"amit_cal23@yahoo.com","step":"account_created","detail":null}
-{"timestamp":"2026-08-24T13:22:36.698Z","employer":"crowdstrike","email":"amit_cal23@yahoo.com","step":"failed","detail":"Step 15: got no usable decision from the model — stopping."}
-{"timestamp":"2026-08-25T07:09:34.226Z","employer":"trellix","email":"amit_cal23@yahoo.com","step":"failed","detail":"blocked: Account creation requires email verification before sign-in (\"Verify your account before you sign in or request a verification email\"). The await_verification_email tool fails with a configuration error: \"secret-mcp: missing GMAIL_CLIENT_ID / GMAIL_CLIENT_SECRET / GMAIL_REFRESH_TOKEN\". …"}
+{"timestamp":"2026-08-24T13:21:15.130Z","employer":"crowdstrike","email":"[REDACTED]","step":"account_created","detail":null}
+{"timestamp":"2026-08-24T13:22:36.698Z","employer":"crowdstrike","email":"[REDACTED]","step":"failed","detail":"Step 15: got no usable decision from the model — stopping."}
+{"timestamp":"2026-08-25T07:09:34.226Z","employer":"trellix","email":"[REDACTED]","step":"failed","detail":"blocked: Account creation requires email verification before sign-in (\"Verify your account before you sign in or request a verification email\"). The await_verification_email tool fails with a configuration error: \"secret-mcp: missing GMAIL_CLIENT_ID / GMAIL_CLIENT_SECRET / GMAIL_REFRESH_TOKEN\". …"}
 ```
 
 ### Working-tree change summary (all uncommitted)
@@ -155,7 +155,7 @@ Total: **10 modified, 2 new; 427 insertions / 66 deletions.** Note: `@modelconte
 
 ### Credential records present (each = an account-creation attempt started)
 
-`data/ats-credentials/broadcom.json`, `crowdstrike.json`, `trellix.json` (all started with `amit_cal23@yahoo.com`). No `data/ats-mcp-*.json` or `data/ats-agent-result-*.json` left behind — temp-file cleanup confirmed working.
+`data/ats-credentials/broadcom.json`, `crowdstrike.json`, `trellix.json` (all started with `[REDACTED]`). No `data/ats-mcp-*.json` or `data/ats-agent-result-*.json` left behind — temp-file cleanup confirmed working.
 
 ### History / prior-observation trail (claude-mem)
 
@@ -223,7 +223,7 @@ Total: **10 modified, 2 new; 427 insertions / 66 deletions.** Note: `@modelconte
 ## Where We're Going
 
 1. **Commit + push the working tree** (user explicitly asked to keep git pushing). Scope check first per CLAUDE.md (GitNexus `impact`/`detect_changes` if available; otherwise a careful manual review of the diff already done above). Include the two new files. Consider splitting into logical commits (redesign core / CLI-hardening / gmail-oauth helper) or one coherent feature commit.
-2. **Unblock Gmail OAuth** — hand `setup-gmail-oauth.mjs` to the human (Aditya/Amit, whoever owns `amit_cal23@yahoo.com`): create a Google Cloud OAuth Desktop client (enable Gmail API; redirect URI `http://127.0.0.1:53682/oauth2callback`), run the script, approve consent, let it write `.env`, restart dev server. Then `await_verification_email` works and Workday-style email-gated signups become completable.
+2. **Unblock Gmail OAuth** — hand `setup-gmail-oauth.mjs` to the human (Aditya/Amit, whoever owns `[REDACTED]`): create a Google Cloud OAuth Desktop client (enable Gmail API; redirect URI `http://127.0.0.1:53682/oauth2callback`), run the script, approve consent, let it write `.env`, restart dev server. Then `await_verification_email` works and Workday-style email-gated signups become completable.
 3. **Finish the in-flight Broadcom test** through the real `/apply` UI (URL: `https://broadcom.wd1.myworkdayjobs.com/External_Career/job/USA-TX-Plano-Legacy-Drive-Suite-700/Cyber-Security-Engineer_R026429`). Watch for: does it reach a real form, or hit email verification (needs step 2)?
 4. **Re-run CrowdStrike** (the original 2026-08-24 failure case) through the real website — confirm the agentic path either reaches the form or reports a genuine evidence-backed block.
 5. **Iterate toward 10 end-to-end passes** per the loop directive. Each failure → diagnose from `/tmp/nextdev.log`, `data/ats-account-log.jsonl`, and the UI blocked/stuck reason → patch → re-run through `/apply`.
