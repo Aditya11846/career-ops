@@ -1,5 +1,33 @@
 # Changelog
 
+## [1.22.0](https://github.com/Aditya11846/career-ops/compare/career-ops-v1.21.0...career-ops-v1.22.0) (2026-08-25)
+
+
+### Features
+
+* **apply-agent:** batch-approve queue for filled applications ([098f301](https://github.com/Aditya11846/career-ops/commit/098f30137195ffbe13e190887c82642701ddf590))
+* **apply-agent:** Tier 1 fill-only orchestrator + needs-input queue ([f5ca73f](https://github.com/Aditya11846/career-ops/commit/f5ca73f58556e69e1abbf9a27fd13339b119f70e))
+* **apply-agent:** Tier 2 scaffolding — pacing, pause-triggers, warm-intro gate, LinkedIn/Naukri drivers ([01eb211](https://github.com/Aditya11846/career-ops/commit/01eb21194a26636b29a4643d91b2f58f7de8abb3))
+* **apply-agent:** wire storageState for persistent Tier 2 LinkedIn/Naukri sessions ([60f41b0](https://github.com/Aditya11846/career-ops/commit/60f41b0fadf4e082795063660005084ac05dae57))
+* **budget-tracker:** add daily LLM-call + Tier-2-apply ceiling enforcement ([6fe308c](https://github.com/Aditya11846/career-ops/commit/6fe308ca57a437637e984b570c57191d52bccaa2))
+* **dashboard:** add needs-input-queue, budget-usage, and pipeline-funnel panels ([b376838](https://github.com/Aditya11846/career-ops/commit/b376838a29884cb9a8d60b9c9c64a3dc61ea2204))
+* **expand:** add /expand mode to discover missing CV competencies ([#1533](https://github.com/Aditya11846/career-ops/issues/1533)) ([1ea5ee6](https://github.com/Aditya11846/career-ops/commit/1ea5ee6379a90dfb1bec17b01aa538a624953848)), closes [#1521](https://github.com/Aditya11846/career-ops/issues/1521)
+* **ghost-filter:** add zero-LLM ghost-listing detector, wire into pipeline mode ([4610c13](https://github.com/Aditya11846/career-ops/commit/4610c137913e71d21391198d4d6473b52744a339))
+* **reply-tracker:** add Gmail OAuth watcher for application replies ([#1583](https://github.com/Aditya11846/career-ops/issues/1583)) ([34c6d96](https://github.com/Aditya11846/career-ops/commit/34c6d964c644020060e3788af3afd3151fe13913))
+* **scan:** add visa_filter for surfacing visa-sponsoring roles ([#1662](https://github.com/Aditya11846/career-ops/issues/1662)) ([995c1dd](https://github.com/Aditya11846/career-ops/commit/995c1ddab6eb1b3aba2fb7ef3e41ff2eb601cc6b)), closes [#2057](https://github.com/Aditya11846/career-ops/issues/2057)
+* **signal-agent:** add company_heat scoring, wire into Machine Summary ([1657691](https://github.com/Aditya11846/career-ops/commit/16576914ba2bd9e36eb534541f4516712c17e680))
+
+
+### Bug Fixes
+
+* **apply-agent:** capture Tier 2 session from real Chrome profile, not automated login ([a8462ef](https://github.com/Aditya11846/career-ops/commit/a8462ef5fe172cc67f829ad124f828ea446bb6e3))
+* **apply-agent:** route orchestrator through Next HTTP API, not tsx import ([afc410f](https://github.com/Aditya11846/career-ops/commit/afc410f3ead1c731482a3adc3bc15b444fdc96af))
+* **apply-agent:** sqlite3 .backup for Cookies DB, diagnostic launch-path logging ([4cc2d8b](https://github.com/Aditya11846/career-ops/commit/4cc2d8baff9fac086b0685700af27459542cdec4))
+* **arbeitsagentur:** only tag nationwide-remote when homeofficetyp is VOLLSTAENDIG ([#1981](https://github.com/Aditya11846/career-ops/issues/1981)) ([b3b466c](https://github.com/Aditya11846/career-ops/commit/b3b466ca69ca8bb6eb9d7e6484ed340faa10a607))
+* **dashboard:** route status/notes writes through set-status.mjs, not raw WriteFile ([302540e](https://github.com/Aditya11846/career-ops/commit/302540e3fbee97b0ca1bfc7347304ebda11601e0))
+* **providers:** build public SmartRecruiters URLs without /postings/ ([#2047](https://github.com/Aditya11846/career-ops/issues/2047)) ([4624242](https://github.com/Aditya11846/career-ops/commit/4624242367056d7c118249279c80b8bb8da62b04))
+* **verify-cv-facts:** stop a bare '&lt;' from swallowing source evidence ([#1995](https://github.com/Aditya11846/career-ops/issues/1995)) ([050828b](https://github.com/Aditya11846/career-ops/commit/050828b339f27cc398bf335d6f1c2b8ff2712145))
+
 ## [1.26.0](https://github.com/santifer/career-ops/compare/career-ops-v1.25.0...career-ops-v1.26.0) (2026-08-10)
 
 

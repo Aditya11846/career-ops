@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.0](https://github.com/Aditya11846/career-ops/compare/web-v0.3.0...web-v0.4.0) (2026-08-25)
+
+
+### Features
+
+* **apply-agent:** batch-approve queue for filled applications ([098f301](https://github.com/Aditya11846/career-ops/commit/098f30137195ffbe13e190887c82642701ddf590))
+* **apply-agent:** wire storageState for persistent Tier 2 LinkedIn/Naukri sessions ([60f41b0](https://github.com/Aditya11846/career-ops/commit/60f41b0fadf4e082795063660005084ac05dae57))
+
 ## [0.3.0](https://github.com/santifer/career-ops/compare/web-v0.2.0...web-v0.3.0) (2026-07-07)
 
 
